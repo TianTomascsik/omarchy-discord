@@ -8,6 +8,8 @@ TestCase {
   readonly property var discordEntry: ({ startupClass: "discord", id: "discord.desktop" })
   readonly property var vesktopEntry: ({ startupClass: "vesktop", id: "vesktop.desktop" })
   readonly property var strangerEntry: ({ startupClass: "slack", id: "slack.desktop" })
+  // Most .desktop files carry no StartupWMClass, and production passes the whole list.
+  readonly property var classlessEntry: ({ id: "gimp.desktop" })
 
   function test_findEntry_prefers_the_client_last_seen_running() {
     var both = [discordEntry, vesktopEntry]
@@ -25,12 +27,19 @@ TestCase {
   }
 
   function test_findEntry_ignores_a_preference_outside_the_supported_set() {
-    compare(Model.findEntry([vesktopEntry], "slack").id, "vesktop.desktop")
+    // The stranger must be IN the list, or the case passes whether or not the gate exists.
+    compare(Model.findEntry([strangerEntry, vesktopEntry], "slack").id, "vesktop.desktop")
   }
 
   function test_findEntry_returns_null_when_no_client_is_installed() {
     compare(Model.findEntry([strangerEntry], ""), null)
     compare(Model.findEntry([], ""), null)
+  }
+
+  function test_findEntry_never_matches_an_entry_without_a_startup_class() {
+    // The empty sentinel for an unsupported preference must not select these.
+    compare(Model.findEntry([classlessEntry], "slack"), null)
+    compare(Model.findEntry([classlessEntry, vesktopEntry], "slack").id, "vesktop.desktop")
   }
 
   function node(binary, appName, opts) {
@@ -39,7 +48,7 @@ TestCase {
       ready: true,
       isStream: true,
       isSink: o.sink === true,
-      type: "",
+      type: o.type || "",
       audio: o.audio === false ? null : ({ muted: false }),
       properties: { "application.process.binary": binary, "application.name": appName }
     }
@@ -59,11 +68,18 @@ TestCase {
     // A screenshare or camera stream is not playback either, so it must not read as a call.
     verify(!Model.isVoiceStream(node("vesktop", "vesktop", { audio: false })))
 
-    // Playback is never a call.
+    // Playback is never a call, whether isSink says so or only the type does.
     verify(!Model.isVoiceStream(node("vesktop", "vesktop", { sink: true })))
+    verify(!Model.isVoiceStream(node("vesktop", "vesktop", { type: "Stream/Output/Audio" })))
   }
 
   function test_isVoiceStream_rejects_a_stream_owned_by_neither_client() {
     verify(!Model.isVoiceStream(node("slack", "vesktop", {})))
+  }
+
+  function test_isVoiceStream_rejects_a_node_the_tracker_has_not_bound_yet() {
+    var unbound = node("vesktop", "vesktop", {})
+    unbound.ready = false
+    verify(!Model.isVoiceStream(unbound))
   }
 }
