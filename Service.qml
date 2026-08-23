@@ -98,10 +98,8 @@ Item {
   // The launcher's own path, so the client lands in app-graphical.slice, not the compositor's.
   function launch() {
     if (!installed) return
-    // The matched entry's StartupWMClass is its desktop file's basename.
-    var entry = Model.findEntry(applications)
-    var desktop = entry && entry.startupClass ? String(entry.startupClass).toLowerCase() + ".desktop" : "discord.desktop"
-    Util.execDetached("uwsm-app -- gtk-launch " + desktop)
+    // StartupWMClass is not the desktop file's basename, which is why the key exists at all.
+    Util.execDetached("uwsm-app -- gtk-launch " + String(Model.findEntry(applications).id))
     settle()
   }
 
