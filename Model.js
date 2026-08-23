@@ -92,11 +92,12 @@ function isOwnedByDiscord(node) {
 }
 
 // vesktop names every stream vesktop, so a call is only its audio capture stream, never video or playback.
+// Discord publishes five nodes in a call and only one is the mic, so the name alone is not enough.
 function isVoiceStream(node) {
   if (!isOwnedByDiscord(node)) return false
-  var name = String(nodeProps(node)["application.name"] || "")
-  if (name === "WEBRTC VoiceEngine") return true
-  return name.toLowerCase() === "vesktop" && !!node.audio && !isPlaybackStream(node)
+  var name = String(nodeProps(node)["application.name"] || "").toLowerCase()
+  if (name !== "webrtc voiceengine" && name !== "vesktop") return false
+  return !!node.audio && !isPlaybackStream(node)
 }
 
 function hasVoiceStream(nodes) {
