@@ -41,7 +41,7 @@ Item {
   // Only while Discord has a window; a tray-hidden instance has nothing to flag.
   readonly property bool attention: Model.anyUrgent(windows)
 
-  // Remembered so a cold launch, when nothing is running to point at, still picks the client in use.
+  // Session-scoped: launch() cannot see a running client, and a first click after a restart falls back to APP_IDS order.
   property string lastClientId: ""
   onToplevelsChanged: {
     var id = Model.runningClientId(toplevels)
