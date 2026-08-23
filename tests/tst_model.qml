@@ -68,7 +68,7 @@ TestCase {
     // A screenshare or camera stream is not playback either, so it must not read as a call.
     verify(!Model.isVoiceStream(node("vesktop", "vesktop", { audio: false })))
 
-    // Playback is never a call. PwNode.type is numeric flags, so isSink is what classifies.
+    // Playback is never a call.
     verify(!Model.isVoiceStream(node("vesktop", "vesktop", { sink: true })))
   }
 

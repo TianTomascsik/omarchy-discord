@@ -110,8 +110,7 @@ function hasVoiceStream(nodes) {
 // A playback stream publishes with isSink true, the same test the audio panel uses.
 function isPlaybackStream(node) {
   if (!node || !node.isStream) return false
-  if (node.isSink === true) return true
-  return String(node.type || "").indexOf("Output") !== -1
+  return node.isSink === true
 }
 
 function findDiscordStream(nodes, playback) {
