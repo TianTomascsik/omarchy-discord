@@ -62,6 +62,12 @@ TestCase {
     verify(!Model.isVoiceStream(node("Discord", "Chromium input", {})))
   }
 
+  // Measured in a live call: Discord publishes five nodes, and three carry this same name.
+  function test_isVoiceStream_rejects_the_discord_playback_and_non_audio_nodes() {
+    verify(!Model.isVoiceStream(node("Discord", "WEBRTC VoiceEngine", { sink: true })))
+    verify(!Model.isVoiceStream(node("Discord", "WEBRTC VoiceEngine", { audio: false })))
+  }
+
   function test_isVoiceStream_accepts_only_a_vesktop_audio_capture_stream() {
     verify(Model.isVoiceStream(node("vesktop", "vesktop", {})))
 
