@@ -85,7 +85,7 @@ function isVoiceStream(node) {
   if (!isOwnedByDiscord(node)) return false
   var name = String(nodeProps(node)["application.name"] || "")
   if (name === "WEBRTC VoiceEngine") return true
-  return isAppId(name) && !!node.audio && !isPlaybackStream(node)
+  return name.toLowerCase() === "vesktop" && !!node.audio && !isPlaybackStream(node)
 }
 
 function hasVoiceStream(nodes) {
