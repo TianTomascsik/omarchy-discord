@@ -78,6 +78,26 @@ TestCase {
     verify(!Model.isVoiceStream(node("vesktop", "vesktop", { sink: true })))
   }
 
+  // The five nodes a live Discord call actually publishes, three sharing the same name.
+  function test_hasVoiceStream_accepts_exactly_the_capture_node_of_a_real_call() {
+    var call = [
+      node("Discord", "WEBRTC VoiceEngine", {}),                 // 82, Stream/Input/Audio
+      node("Discord", "WEBRTC VoiceEngine", { sink: true }),     // 74, Stream/Output/Audio
+      node("Discord", "WEBRTC VoiceEngine", { audio: false }),   // 79, no media.class
+      node("Discord", "WEBRTC VoiceEngine", { audio: false }),   // 83, no media.class
+      node("Discord", "Chromium input", { audio: false })        // 84, no media.class
+    ]
+    verify(Model.hasVoiceStream(call))
+    var accepted = 0
+    for (var i = 0; i < call.length; i++) {
+      if (Model.isVoiceStream(call[i])) accepted++
+    }
+    compare(accepted, 1)
+
+    // The same set with the mic gone is not a call, which is what the widget must show.
+    verify(!Model.hasVoiceStream(call.slice(1)))
+  }
+
   function test_isVoiceStream_rejects_a_stream_owned_by_neither_client() {
     verify(!Model.isVoiceStream(node("slack", "vesktop", {})))
   }
