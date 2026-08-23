@@ -15,7 +15,7 @@ function isAppId(value) {
 // Desktop list order is arbitrary, so pick the client last seen running, then APP_IDS order.
 function findEntry(applications, preferredId) {
   var list = applications || []
-  var wanted = [String(preferredId || "").toLowerCase()].concat(APP_IDS)
+  var wanted = [isAppId(preferredId) ? String(preferredId).toLowerCase() : ""].concat(APP_IDS)
   for (var w = 0; w < wanted.length; w++) {
     if (wanted[w] === "") continue
     for (var i = 0; i < list.length; i++) {
