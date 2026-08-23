@@ -2,17 +2,34 @@
 
 var KIB_PER_MIB = 1024
 var MIB_PER_GIB = 1024
+// The two supported clients: the discord package publishes discord/Discord, vesktop vesktop.
+var APP_IDS = ["discord", "vesktop"]
+
+function isAppId(value) {
+  return APP_IDS.indexOf(String(value || "").toLowerCase()) !== -1
+}
 
 // ---------------------------------------------------------------- desktop
 
 // Quickshell 0.3 exposes StartupWMClass as startupClass and no entry id to match.
-function findEntry(applications) {
+// Desktop list order is arbitrary, so pick the client last seen running, then APP_IDS order.
+function findEntry(applications, preferredId) {
   var list = applications || []
-  for (var i = 0; i < list.length; i++) {
-    var entry = list[i]
-    if (entry && String(entry.startupClass || "").toLowerCase() === "discord") return entry
+  var wanted = [isAppId(preferredId) ? String(preferredId).toLowerCase() : ""].concat(APP_IDS)
+  for (var w = 0; w < wanted.length; w++) {
+    if (wanted[w] === "") continue
+    for (var i = 0; i < list.length; i++) {
+      var entry = list[i]
+      if (entry && String(entry.startupClass || "").toLowerCase() === wanted[w]) return entry
+    }
   }
   return null
+}
+
+// The app id of the client actually on screen, which is what disambiguates a later cold launch.
+function runningClientId(toplevels) {
+  var matched = matchWindows(toplevels)
+  return matched.length > 0 ? String(toplevelClass(matched[0])).toLowerCase() : ""
 }
 
 // ---------------------------------------------------------------- windows
@@ -26,12 +43,12 @@ function toplevelClass(toplevel) {
   return ipc ? String(ipc["class"] || ipc["initialClass"] || "") : ""
 }
 
-// hyprctl reports both class and initialClass as exactly "discord" here.
+// hyprctl reports class and initialClass as the client's own app id here.
 function matchWindows(toplevels) {
   var list = toplevels || []
   var out = []
   for (var i = 0; i < list.length; i++) {
-    if (String(toplevelClass(list[i])).toLowerCase() === "discord") out.push(list[i])
+    if (isAppId(toplevelClass(list[i]))) out.push(list[i])
   }
   return out
 }
@@ -71,12 +88,15 @@ function streamNodes(nodes) {
 
 // Streams say "WEBRTC VoiceEngine", so the process binary alone names the app.
 function isOwnedByDiscord(node) {
-  return String(nodeProps(node)["application.process.binary"] || "") === "Discord"
+  return isAppId(nodeProps(node)["application.process.binary"])
 }
 
-// The voice engine holds streams only while in a call; notification sounds do not.
+// vesktop names every stream vesktop, so a call is only its audio capture stream, never video or playback.
 function isVoiceStream(node) {
-  return isOwnedByDiscord(node) && String(nodeProps(node)["application.name"] || "") === "WEBRTC VoiceEngine"
+  if (!isOwnedByDiscord(node)) return false
+  var name = String(nodeProps(node)["application.name"] || "")
+  if (name === "WEBRTC VoiceEngine") return true
+  return name.toLowerCase() === "vesktop" && !!node.audio && !isPlaybackStream(node)
 }
 
 function hasVoiceStream(nodes) {
@@ -90,8 +110,7 @@ function hasVoiceStream(nodes) {
 // A playback stream publishes with isSink true, the same test the audio panel uses.
 function isPlaybackStream(node) {
   if (!node || !node.isStream) return false
-  if (node.isSink === true) return true
-  return String(node.type || "").indexOf("Output") !== -1
+  return node.isSink === true
 }
 
 function findDiscordStream(nodes, playback) {
@@ -107,7 +126,8 @@ function findDiscordStream(nodes, playback) {
 
 // ---------------------------------------------------------------- process
 
-// lines look like "239958 272772 /home/gm/.config/discord/app-1.0.154/Discord --type=renderer"
+// discord: "239958 272772 /home/gm/.config/discord/app-1.0.154/Discord --type=renderer"
+// vesktop: "248461 384348 /usr/lib/vesktop/vesktop"
 // The main process is the one with no --type=; signalling a child files a crash report.
 function parseProcesses(raw) {
   var lines = String(raw || "").split("\n")

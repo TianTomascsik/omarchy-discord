@@ -41,6 +41,13 @@ Item {
   // Only while Discord has a window; a tray-hidden instance has nothing to flag.
   readonly property bool attention: Model.anyUrgent(windows)
 
+  // Session-scoped: launch() cannot see a running client, and a first click after a restart falls back to APP_IDS order.
+  property string lastClientId: ""
+  onToplevelsChanged: {
+    var id = Model.runningClientId(toplevels)
+    if (id !== "") lastClientId = id
+  }
+
   // ------------------------------------------------------------ voice
 
   readonly property var nodes: Pipewire.nodes ? Pipewire.nodes.values : []
@@ -95,10 +102,11 @@ Item {
     mainPid = parsed.mainPid
   }
 
-  // The launcher's own path, so Discord lands in app-graphical.slice, not the compositor's.
+  // The launcher's own path, so the client lands in app-graphical.slice, not the compositor's.
   function launch() {
     if (!installed) return
-    Util.execDetached("uwsm-app -- gtk-launch discord.desktop")
+    // StartupWMClass is not the desktop file's basename, which is why the key exists at all.
+    Util.execDetached("uwsm-app -- gtk-launch " + String(Model.findEntry(applications, lastClientId).id))
     settle()
   }
 
@@ -164,7 +172,7 @@ Item {
   Process {
     id: statusProcess
     running: false
-    command: ["ps", "-C", "Discord", "-o", "pid=,rss=,args="]
+    command: ["ps", "-C", "Discord,vesktop", "-o", "pid=,rss=,args="]
 
     stdout: StdioCollector {
       id: statusStdout

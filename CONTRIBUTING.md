@@ -26,8 +26,13 @@ seconds before concluding anything about your edit.
 ```bash
 omarchy plugin validate ~/.config/omarchy/plugins/io.github.thisisgm.discord
 python3 test_rpc.py
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests
 qs log -p "$OMARCHY_PATH/shell" --tail 60 | grep -i thisisgm
 ```
+
+`Model.js` is pure functions, so its matchers are asserted directly. A green run
+proves nothing on its own: delete a term from the predicate under test and check
+that exactly one case goes red before trusting it.
 
 **Look at the thing.** This is a visual component and a screenshot is the test.
 The worst defect found in review was invisible to three careful readers of the
