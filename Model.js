@@ -12,13 +12,24 @@ function isAppId(value) {
 // ---------------------------------------------------------------- desktop
 
 // Quickshell 0.3 exposes StartupWMClass as startupClass and no entry id to match.
-function findEntry(applications) {
+// With both clients installed the desktop list order is arbitrary, so the one seen running wins.
+function findEntry(applications, preferredId) {
   var list = applications || []
+  var wanted = String(preferredId || "").toLowerCase()
+  var fallback = null
   for (var i = 0; i < list.length; i++) {
     var entry = list[i]
-    if (entry && isAppId(entry.startupClass)) return entry
+    if (!entry || !isAppId(entry.startupClass)) continue
+    if (wanted && String(entry.startupClass).toLowerCase() === wanted) return entry
+    if (fallback === null) fallback = entry
   }
-  return null
+  return fallback
+}
+
+// The app id of the client actually on screen, which is what disambiguates a later cold launch.
+function runningClientId(toplevels) {
+  var matched = matchWindows(toplevels)
+  return matched.length > 0 ? String(toplevelClass(matched[0])).toLowerCase() : ""
 }
 
 // ---------------------------------------------------------------- windows

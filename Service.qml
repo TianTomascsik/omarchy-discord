@@ -41,6 +41,13 @@ Item {
   // Only while Discord has a window; a tray-hidden instance has nothing to flag.
   readonly property bool attention: Model.anyUrgent(windows)
 
+  // Remembered so a cold launch, when nothing is running to point at, still picks the client in use.
+  property string lastClientId: ""
+  onToplevelsChanged: {
+    var id = Model.runningClientId(toplevels)
+    if (id !== "") lastClientId = id
+  }
+
   // ------------------------------------------------------------ voice
 
   readonly property var nodes: Pipewire.nodes ? Pipewire.nodes.values : []
@@ -99,7 +106,7 @@ Item {
   function launch() {
     if (!installed) return
     // StartupWMClass is not the desktop file's basename, which is why the key exists at all.
-    Util.execDetached("uwsm-app -- gtk-launch " + String(Model.findEntry(applications).id))
+    Util.execDetached("uwsm-app -- gtk-launch " + String(Model.findEntry(applications, lastClientId).id))
     settle()
   }
 
