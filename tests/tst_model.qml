@@ -48,7 +48,7 @@ TestCase {
       ready: true,
       isStream: true,
       isSink: o.sink === true,
-      type: o.type || "",
+      type: 0,
       audio: o.audio === false ? null : ({ muted: false }),
       properties: { "application.process.binary": binary, "application.name": appName }
     }
@@ -68,9 +68,8 @@ TestCase {
     // A screenshare or camera stream is not playback either, so it must not read as a call.
     verify(!Model.isVoiceStream(node("vesktop", "vesktop", { audio: false })))
 
-    // Playback is never a call, whether isSink says so or only the type does.
+    // Playback is never a call. PwNode.type is numeric flags, so isSink is what classifies.
     verify(!Model.isVoiceStream(node("vesktop", "vesktop", { sink: true })))
-    verify(!Model.isVoiceStream(node("vesktop", "vesktop", { type: "Stream/Output/Audio" })))
   }
 
   function test_isVoiceStream_rejects_a_stream_owned_by_neither_client() {
