@@ -25,6 +25,7 @@ Panel {
   readonly property bool followWorkspace: setting("followWorkspace", false) === true
   readonly property bool joinInBackground: setting("joinInBackground", true) === true
   readonly property bool notifyPopup: setting("notifyPopup", true) === true
+  readonly property bool callNotify: setting("callNotify", true) === true
   readonly property bool notifySound: setting("notifySound", true) === true
   readonly property string notifySoundFile: String(setting("notifySoundFile", ""))
   readonly property var watchedFriends: Model.entryList(settings ? settings.watchedFriends : null)
@@ -169,7 +170,9 @@ Panel {
     var talking = discord.rpc.speaking
     if (talking.length === 1) return talking[0] + " is talking"
     if (talking.length > 1) return talking.join(", ") + " are talking"
-    return "Connected"
+    // Who else is here, so a call reads as company rather than a state.
+    var company = Model.memberSummary(discord.callMembers)
+    return company === "" ? "Connected · just you" : "Connected · " + company
   }
   // The meter reads low at speech level, so scale it up to fill the bar.
   readonly property real peakScale: 1.6
@@ -232,6 +235,7 @@ Panel {
         if (discord.watchableFriends.length > 0) list.push({ kind: "watch" })
         list.push({ kind: "notifyPopup" })
         list.push({ kind: "notifySound" })
+        list.push({ kind: "callNotify" })
         list.push({ kind: "notifyTest" })
       }
     }
@@ -291,6 +295,7 @@ Panel {
     case "joinBackground": root.persist("joinInBackground", !root.joinInBackground); break
     case "notifyPopup": root.persist("notifyPopup", !root.notifyPopup); break
     case "notifySound": root.persist("notifySound", !root.notifySound); break
+    case "callNotify": root.persist("callNotify", !root.callNotify); break
     case "notifyTest": discord.notifyTest(); break
     case "friend": root.unwatchFriend(discord.watchedRows[currentRow.key].id); break
     case "grant": discord.grantFriends(); break
@@ -321,6 +326,7 @@ Panel {
     watchedFriends: root.watchedFriends
     notifyPopup: root.notifyPopup
     notifySound: root.notifySound
+    callNotify: root.callNotify
     notifySoundFile: root.notifySoundFile
     favouriteChannels: root.favouriteChannels
   }
@@ -948,6 +954,16 @@ Panel {
                 sub: root.notifySound ? (root.notifySoundFile !== "" ? root.notifySoundFile : "The freedesktop message sound") : "Off"
                 checked: root.notifySound
                 onToggled: root.persist("notifySound", !root.notifySound)
+              }
+
+              SettingRow {
+                width: parent.width
+                kind: "callNotify"
+                glyph: "󰋋"
+                label: "Who joins or leaves your call"
+                sub: root.callNotify ? "A popup names them; Discord plays its own sound" : "Off"
+                checked: root.callNotify
+                onToggled: root.persist("callNotify", !root.callNotify)
               }
 
               ActionRow {

@@ -27,6 +27,8 @@ Item {
   // How an arrival is announced: the shell's popup, a sound, or both; "" picks the freedesktop message sound.
   property bool notifyPopup: true
   property bool notifySound: true
+  // Who joins or leaves the call you are in; Discord plays its own sound for that, so this is a popup only.
+  property bool callNotify: true
   property string notifySoundFile: ""
   readonly property string defaultSoundFile: "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga"
   readonly property string soundFile: notifySoundFile !== "" ? notifySoundFile : defaultSoundFile
@@ -254,6 +256,55 @@ Item {
       }
     }
     pendingArrivals = {}
+  }
+
+  // ------------------------------------------------------------ call changes
+
+  readonly property var callMembers: bridge.callMembers
+  property var lastCallMembers: []
+  property string lastCallChannel: ""
+  property var pendingCallJoined: []
+  property var pendingCallLeft: []
+
+  // A new channel seeds; only a change within the same channel is a join or a leave.
+  onCallMembersChanged: {
+    if (callChannelId === "") {
+      lastCallChannel = ""
+      lastCallMembers = []
+      return
+    }
+    if (callChannelId !== lastCallChannel) {
+      lastCallChannel = callChannelId
+      lastCallMembers = callMembers
+      return
+    }
+    var changes = Model.callChanges(lastCallMembers, callMembers)
+    lastCallMembers = callMembers
+    if (changes.joined.length === 0 && changes.left.length === 0) return
+    pendingCallJoined = pendingCallJoined.concat(changes.joined)
+    pendingCallLeft = pendingCallLeft.concat(changes.left)
+    callChangeTimer.restart()
+  }
+
+  Timer {
+    id: callChangeTimer
+    interval: root.arrivalBatchMs
+    onTriggered: root.flushCallChanges()
+  }
+
+  function flushCallChanges() {
+    var joined = pendingCallJoined
+    var left = pendingCallLeft
+    pendingCallJoined = []
+    pendingCallLeft = []
+    if (!callNotify || callChannelId === "") return
+    var headline = Model.callChangeHeadline(joined, left)
+    if (headline === "") return
+    console.log("omarchy-discord notify: " + headline)
+    if (notifyPopup) {
+      Util.execArgv(["omarchy-notification-send", "--app-name", "Discord", "-g", "󰋋", "-u", "low",
+        headline, Model.callPlace(callChannel, callGuild), "--exec", "omarchy-shell", "discord", "raise"])
+    }
   }
 
   // Same popup and sound switches as a friend's arrival; clicking the toast joins that channel.

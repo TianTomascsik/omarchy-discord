@@ -610,6 +610,60 @@ def a_voice_state_event_rereads_the_favourites():
           any(line.get("channelMembers", {}).get("1") == ["fabsi"] for line in lines), lines)
 
 
+def the_call_lists_everyone_but_the_user():
+    fake = FakeRpc()
+    fake.answers = {"GET_CHANNEL": {"name": "General", "guild_id": "10", "voice_states": [
+        {"nick": "Me", "user": {"id": "self"}}, {"nick": "Fabsi", "user": {"id": "1"}}, {"user": {"id": "2", "username": "pixel"}}]},
+        "GET_GUILD": {"name": "Srv"}}
+    bridge = rpc.Bridge(fake, user_id="self")
+    bridge.select_channel("77")
+    check("callMembers names the others, sorted", bridge.state["callMembers"] == ["Fabsi", "pixel"], bridge.state["callMembers"])
+    check("the speaking map still knows everyone", set(bridge.members) == {"self", "1", "2"}, bridge.members)
+    bridge.select_channel(None)
+    check("leaving empties the list", bridge.state["callMembers"] == [])
+
+
+def the_call_and_a_watched_favourite_share_one_subscription():
+    fake = FakeRpc()
+    fake.answers = {"GET_SELECTED_VOICE_CHANNEL": {}, "GET_CHANNEL": {"name": "General", "voice_states": []}, "GET_GUILD": {"name": "Srv"}}
+    subscribed, unsubscribed = [], []
+    fake.subscribe = lambda event, args=None: subscribed.append((event, (args or {}).get("channel_id"))) or "0"
+    fake.unsubscribe = lambda event, args=None: unsubscribed.append((event, (args or {}).get("channel_id"))) or "0"
+    bridge = rpc.Bridge(fake)
+    bridge.counted = ["77"]
+    bridge.watch_channels()
+    bridge.select_channel("77")
+    voice = [s for s in subscribed if s[0].startswith("VOICE_STATE")]
+    check("joining a watched favourite does not subscribe it twice", len(voice) == 2, voice)
+    bridge.select_channel(None)
+    check("leaving it keeps the favourite's watch", not any(u[0].startswith("VOICE_STATE") for u in unsubscribed), unsubscribed)
+    bridge.select_channel("88")
+    bridge.counted = []
+    bridge.watch_channels()
+    check("dropping the favourite while in another call unsubscribes it",
+          sorted(u for u in unsubscribed if u[0].startswith("VOICE_STATE")) == [("VOICE_STATE_CREATE", "77"), ("VOICE_STATE_DELETE", "77")], unsubscribed)
+
+
+def a_voice_state_event_rereads_the_call_too():
+    """The run loop's own refresh finds the call empty; the event that follows is what brings Fabsi in."""
+    frame = (rpc.OP_FRAME, {"cmd": "DISPATCH", "evt": "VOICE_STATE_CREATE", "data": {}})
+    fake = FakeRpc([frame])
+    reads = []
+    def channel(args):
+        reads.append(args["channel_id"])
+        arrived = reads.count("77") > 1
+        return {"name": "General", "guild_id": "10", "voice_states": [{"nick": "Fabsi", "user": {"id": "1"}}] if arrived else []}
+    fake.answers = {"GET_SELECTED_VOICE_CHANNEL": {"id": "77"}, "GET_CHANNEL": channel, "GET_GUILD": {"name": "Srv"}}
+    bridge = rpc.Bridge(fake, user_id="self")
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        try:
+            bridge.run()
+        except rpc.RpcError:
+            pass
+    lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    check("someone joining the call reaches the snapshot", any(line.get("callMembers") == ["Fabsi"] for line in lines), lines)
+
+
 def member_name_prefers_nick_then_display_name():
     check("nick wins", rpc.member_name({"nick": "Fab", "user": {"global_name": "Fabsi", "username": "fabsi"}}) == "Fab")
     check("then the display name", rpc.member_name({"user": {"global_name": "Fabsi", "username": "fabsi"}}) == "Fabsi")
@@ -657,6 +711,9 @@ def main():
                  refresh_subscribes_to_voice_states_of_the_favourites,
                  a_voice_state_event_rereads_the_favourites,
                  member_name_prefers_nick_then_display_name,
+                 the_call_lists_everyone_but_the_user,
+                 the_call_and_a_watched_favourite_share_one_subscription,
+                 a_voice_state_event_rereads_the_call_too,
                  a_cached_token_is_never_reprompted,
                  a_first_authorization_asks_for_voice_only_once,
                  a_refused_authorization_is_fatal_not_a_loop,

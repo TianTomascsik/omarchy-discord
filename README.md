@@ -198,6 +198,12 @@ server and, once the bridge has looked, how many people are in the channel.
 Joining goes through Discord's own `SELECT_VOICE_CHANNEL`, so it needs the
 bridge; the rows still show without it, and pressing one says so.
 
+While you are in a call, the call row says who is with you, "Connected ·
+Fabsi, Pixel", and when someone joins or leaves it a popup names them:
+"Bene joined your call", "Fabsi left your call". Discord already plays its
+own sound for that, so this one is a popup only, and the **Who joins or
+leaves your call** switch turns it off.
+
 Each row also shows who is in the channel, live: the bridge subscribes to
 Discord's voice-state events for every favourite, so names appear the moment
 someone joins. The bell on a row (or `w` on the keyboard) **watches** the
@@ -261,7 +267,7 @@ too.
 
 ## Settings
 
-Ten, in Setup > Plugins or with `omarchy bar set`:
+Eleven, in Setup > Plugins or with `omarchy bar set`:
 
 | Key | Type | Does |
 |---|---|---|
@@ -275,6 +281,7 @@ Ten, in Setup > Plugins or with `omarchy bar set`:
 | `notifyPopup` | boolean | show the shell's popup when a watched friend comes online |
 | `notifySound` | boolean | play a sound as well |
 | `notifySoundFile` | path | the sound to play; empty means `/usr/share/sounds/freedesktop/stereo/message-new-instant.oga` |
+| `callNotify` | boolean | popup naming who joins or leaves the call you are in |
 
 ## Limits worth knowing
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.thisisgm.discord",
   "name": "Discord",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "GM",
   "license": "MIT",
   "description": "Discord in the Omarchy bar: attention badge, call state, volume, window focus, memory footprint, a workspace preset, favourite voice channels you join in one press, and friend online notifications.",
@@ -31,7 +31,8 @@
       "joinInBackground": true,
       "notifyPopup": true,
       "notifySound": true,
-      "notifySoundFile": ""
+      "notifySoundFile": "",
+      "callNotify": true
     },
     "schema": [
       {
@@ -96,6 +97,12 @@
         "type": "path",
         "label": "Sound file to play (empty: the freedesktop message sound)",
         "defaultValue": ""
+      },
+      {
+        "key": "callNotify",
+        "type": "boolean",
+        "label": "Popup naming who joins or leaves the call you are in",
+        "defaultValue": true
       }
     ]
   },

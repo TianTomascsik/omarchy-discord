@@ -689,14 +689,36 @@ function channelArrivals(previous, members, favourites, callChannelId) {
   return out
 }
 
+// "Fabsi", "Fabsi and Pixel", "Fabsi, Pixel and 2 more".
+function nameList(names) {
+  var list = names || []
+  if (list.length === 0) return ""
+  if (list.length === 1) return list[0]
+  if (list.length === 2) return list[0] + " and " + list[1]
+  return list[0] + ", " + list[1] + " and " + (list.length - 2) + " more"
+}
+
 // "Fabsi joined #Fummelparty", "Fabsi and Pixel joined", "Fabsi, Pixel and 2 more joined".
 function arrivalHeadline(names, channelName) {
-  var list = names || []
-  var who
-  if (list.length === 1) who = list[0]
-  else if (list.length === 2) who = list[0] + " and " + list[1]
-  else who = list[0] + ", " + list[1] + " and " + (list.length - 2) + " more"
-  return who + " joined " + channelLabel(channelName)
+  return nameList(names) + " joined " + channelLabel(channelName)
+}
+
+// Who came and who went between two member lists of the user's own call.
+function callChanges(previous, current) {
+  var before = previous || []
+  var now = current || []
+  return {
+    joined: now.filter(function (name) { return before.indexOf(name) === -1 }),
+    left: before.filter(function (name) { return now.indexOf(name) === -1 })
+  }
+}
+
+// "Fabsi joined your call", "Pixel left your call", "Fabsi joined, Pixel left your call".
+function callChangeHeadline(joined, left) {
+  var parts = []
+  if ((joined || []).length > 0) parts.push(nameList(joined) + " joined")
+  if ((left || []).length > 0) parts.push(nameList(left) + " left")
+  return parts.length === 0 ? "" : parts.join(", ") + " your call"
 }
 
 function favouriteName(favourites, id) {

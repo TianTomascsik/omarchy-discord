@@ -419,6 +419,17 @@ TestCase {
     compare(Model.channelArrivals(before, before, favourites, "").length, 0)
   }
 
+  function test_callChanges_and_headline_name_who_came_and_went() {
+    var changes = Model.callChanges(["Fabsi", "Pixel"], ["Pixel", "Bene", "Jojo"])
+    compare(changes.joined, ["Bene", "Jojo"])
+    compare(changes.left, ["Fabsi"])
+    compare(Model.callChangeHeadline(["Bene"], []), "Bene joined your call")
+    compare(Model.callChangeHeadline([], ["Fabsi"]), "Fabsi left your call")
+    compare(Model.callChangeHeadline(["Bene", "Jojo"], ["Fabsi"]), "Bene and Jojo joined, Fabsi left your call")
+    compare(Model.callChangeHeadline([], []), "")
+    compare(Model.callChanges([], []).joined.length, 0)
+  }
+
   function test_arrivalHeadline_reads_naturally() {
     compare(Model.arrivalHeadline(["Fabsi"], "Fummelparty"), "Fabsi joined #Fummelparty")
     compare(Model.arrivalHeadline(["Fabsi", "Pixel"], "Fummelparty"), "Fabsi and Pixel joined #Fummelparty")

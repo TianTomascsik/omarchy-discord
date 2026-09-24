@@ -47,6 +47,8 @@ Item {
   // {"123": 2} occupancy for the favourites the last refresh asked about, and {"123": ["Fabsi"]} who is there.
   property var channelCounts: ({})
   property var channelMembers: ({})
+  // Everyone in the user's own call except the user, by name.
+  property var callMembers: []
   // {"channelId":"123","code":4005,"message":"..."} for the last refused join, empty otherwise.
   property var joinError: ({})
   // [{id, name, channels:[{id, name}]}] once listChannels() has been answered; cached per bridge session.
@@ -69,6 +71,7 @@ Item {
     channelId = ""
     channelCounts = {}
     channelMembers = {}
+    callMembers = []
     joinError = {}
     channelGuilds = []
   }
@@ -143,6 +146,7 @@ Item {
     root.channelId = String(state.channelId || "")
     root.channelCounts = state.channelCounts && typeof state.channelCounts === "object" ? state.channelCounts : {}
     root.channelMembers = state.channelMembers && typeof state.channelMembers === "object" ? state.channelMembers : {}
+    root.callMembers = state.callMembers instanceof Array ? state.callMembers : []
     root.joinError = state.joinError && typeof state.joinError === "object" ? state.joinError : {}
     root.unauthorized = false
     root.ready = true

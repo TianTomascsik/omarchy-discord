@@ -405,8 +405,10 @@ def friend_entry(data):
 
 class Bridge:
     def __init__(self, rpc, friends_enabled=True, client_id="", client_secret="",
-                 friends_scope="granted", friends_reason=""):
+                 friends_scope="granted", friends_reason="", user_id=""):
         self.rpc = rpc
+        # The account's own id from READY, so "who is in my call" never lists the user themselves.
+        self.user_id = str(user_id or "")
         self.friends_enabled = friends_enabled
         self.client_id = client_id
         self.client_secret = client_secret
@@ -429,7 +431,8 @@ class Bridge:
                       "ping": 0, "voiceState": "",
                       "friends": [], "friendsOk": False, "friendsError": "",
                       "friendsScope": friends_scope,
-                      "channelId": "", "channelCounts": {}, "channelMembers": {}, "joinError": {}}
+                      "channelId": "", "channelCounts": {}, "channelMembers": {}, "joinError": {},
+                      "callMembers": []}
 
     def emit_line(self, payload):
         sys.stdout.write(json.dumps(payload) + "\n")
@@ -482,15 +485,13 @@ class Bridge:
     def watch_channels(self):
         wanted = set(self.counted)
         for channel_id in self.watched - wanted:
-            for event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
-                try:
-                    self.rpc.unsubscribe(event, {"channel_id": channel_id})
-                except RpcError:
-                    pass
+            if not self.voice_states_wanted_elsewhere(channel_id, False):
+                self.unsubscribe_voice_states(channel_id)
         for channel_id in wanted - self.watched:
+            if self.voice_states_wanted_elsewhere(channel_id, False):
+                continue
             try:
-                for event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
-                    self.rpc.subscribe(event, {"channel_id": channel_id})
+                self.subscribe_voice_states(channel_id)
             except RpcRejected as error:
                 warn("Discord refused watching channel %s: %s" % (channel_id, error))
                 wanted.discard(channel_id)
@@ -557,6 +558,7 @@ class Bridge:
         self.speaking.clear()
         self.members.clear()
         self.state["channelId"] = str(channel_id or "")
+        self.state["callMembers"] = []
         if not channel_id:
             self.state["channel"] = ""
             self.state["guild"] = ""
@@ -567,12 +569,45 @@ class Bridge:
         channel = self.rpc.request("GET_CHANNEL", {"channel_id": channel_id})
         self.state["channel"] = channel.get("name", "")
         self.state["guild"] = self.guild_name(channel.get("guild_id"))
-        # voice_states already names everyone sitting in the call
-        for entry in channel.get("voice_states") or []:
+        self.apply_call_members(channel.get("voice_states") or [])
+        self.resubscribe(channel_id)
+
+    # voice_states names everyone sitting in the call; callMembers is everyone but the user.
+    def apply_call_members(self, states):
+        self.members.clear()
+        for entry in states:
             user = entry.get("user") or {}
             if user.get("id"):
-                self.members[user["id"]] = entry.get("nick") or user.get("username") or user["id"]
-        self.resubscribe(channel_id)
+                self.members[user["id"]] = member_name(entry)
+        self.state["callMembers"] = sorted(
+            name for user_id, name in self.members.items() if str(user_id) != self.user_id)
+
+    # A VOICE_STATE event carries no channel id, so the call and every favourite are re-read together.
+    def reload_members(self):
+        if self.subscribed_channel:
+            try:
+                channel = self.rpc.request("GET_CHANNEL", {"channel_id": self.subscribed_channel})
+                self.apply_call_members(channel.get("voice_states") or [])
+            except RpcRejected as error:
+                warn("Discord refused re-reading the call: %s" % error)
+        self.load_counts()
+
+    # VOICE_STATE subscriptions are shared between the call and the watched favourites, one pair per channel.
+    def voice_states_wanted_elsewhere(self, channel_id, by_call):
+        if by_call:
+            return channel_id in self.watched
+        return channel_id == self.subscribed_channel
+
+    def subscribe_voice_states(self, channel_id):
+        for event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
+            self.rpc.subscribe(event, {"channel_id": channel_id})
+
+    def unsubscribe_voice_states(self, channel_id):
+        for event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
+            try:
+                self.rpc.unsubscribe(event, {"channel_id": channel_id})
+            except RpcError:
+                pass
 
     def resubscribe(self, channel_id):
         for event in ("SPEAKING_START", "SPEAKING_STOP"):
@@ -583,7 +618,15 @@ class Bridge:
                     pass
             if channel_id:
                 self.rpc.subscribe(event, {"channel_id": channel_id})
+        previous = self.subscribed_channel
         self.subscribed_channel = channel_id
+        if previous and not self.voice_states_wanted_elsewhere(previous, True):
+            self.unsubscribe_voice_states(previous)
+        if channel_id and not self.voice_states_wanted_elsewhere(channel_id, True):
+            try:
+                self.subscribe_voice_states(channel_id)
+            except RpcRejected as error:
+                warn("Discord refused watching the call: %s" % error)
 
     # {"state": "VOICE_CONNECTED", "average_ping": 36, "last_ping": 35, ...}
     def apply_connection(self, data):
@@ -610,7 +653,7 @@ class Bridge:
         elif event == "RELATIONSHIP_UPDATE":
             return self.apply_relationship(data)
         elif event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
-            self.load_counts()
+            self.reload_members()
         else:
             return False
         return True
@@ -743,12 +786,13 @@ def session():
     client_id, client_secret = credentials()
     rpc = Rpc(connect_socket())
     try:
-        handshake(rpc, client_id)
+        ready = handshake(rpc, client_id)
         token = obtain_token(rpc, client_id, client_secret)
         rpc.request("AUTHENTICATE", {"access_token": token["access_token"]})
         scope, reason = friends_scope_state(token)
         Bridge(rpc, friends_enabled=scope == "granted", client_id=client_id,
-               client_secret=client_secret, friends_scope=scope, friends_reason=reason).run()
+               client_secret=client_secret, friends_scope=scope, friends_reason=reason,
+               user_id=(ready.get("user") or {}).get("id", "")).run()
     finally:
         rpc.close()
 
