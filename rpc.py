@@ -10,7 +10,7 @@ Set it up with:         python3 rpc.py --setup
 Check it by hand with:  python3 rpc.py --probe
 """
 
-import json, os, queue, select, signal, socket, struct, subprocess, sys, threading, time
+import json, os, queue, select, socket, struct, subprocess, sys, threading, time
 import urllib.error, urllib.parse, urllib.request
 
 OP_HANDSHAKE, OP_FRAME, OP_CLOSE, OP_PING, OP_PONG = 0, 1, 2, 3, 4
@@ -33,7 +33,6 @@ RECONNECT_DELAY_SEC = 5
 SOCKET_POLL_SEC = 0.2
 # Discord pings several times a second; a bar only cares about the coarse value.
 PING_ROUND_MS = 10
-SECRETS_READ_TIMEOUT_SEC = 5
 # Warnings quote their input, clipped so one bad line cannot flood the log.
 WARN_INPUT_CHARS = 80
 HTTP_DETAIL_CHARS = 200
@@ -48,8 +47,6 @@ CONFIG_DIR = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
     "omarchy-discord")
 CREDENTIALS_PATH = os.path.join(CONFIG_DIR, "credentials.json")
-SECRETS_PATH = os.environ.get("OMARCHY_DISCORD_SECRETS",
-                              os.path.expanduser("~/.claude/secrets/.env"))
 
 
 COMMANDS = queue.Queue()
@@ -90,35 +87,6 @@ def start_stdin_reader():
     threading.Thread(target=pump, daemon=True).start()
 
 
-# lines look like "DISCORD_CLIENT_ID=1234567890", values never evaluated
-def read_secrets_file(path):
-    """Parse KEY=value pairs the way load-secrets.sh does, without running them."""
-    values = {}
-    if not os.path.exists(path):
-        return values
-
-    def expired(_signum, _frame):
-        raise TimeoutError
-
-    # The 1Password mount is a FIFO that blocks until the app serves it.
-    previous = signal.signal(signal.SIGALRM, expired)
-    signal.alarm(SECRETS_READ_TIMEOUT_SEC)
-    try:
-        with open(path, "r") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                values[key.strip()] = value
-    except (TimeoutError, OSError):
-        return {}
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
-    return values
-
-
 def write_private(path, payload):
     """Write JSON readable only by its owner, and never briefly wider."""
     os.makedirs(os.path.dirname(path), mode=TOKEN_DIR_MODE, exist_ok=True)
@@ -144,17 +112,13 @@ def read_credentials_file():
 
 
 def credentials():
-    """Environment first, then the file --setup writes, then a secrets mount."""
+    """Environment first, then the file --setup writes; nothing else is read."""
     client_id = os.environ.get("DISCORD_CLIENT_ID", "")
     client_secret = os.environ.get("DISCORD_CLIENT_SECRET", "")
     if not client_id or not client_secret:
         stored = read_credentials_file()
         client_id = client_id or str(stored.get("client_id", ""))
         client_secret = client_secret or str(stored.get("client_secret", ""))
-    if not client_id or not client_secret:
-        secrets = read_secrets_file(SECRETS_PATH)
-        client_id = client_id or secrets.get("DISCORD_CLIENT_ID", "")
-        client_secret = client_secret or secrets.get("DISCORD_CLIENT_SECRET", "")
     if not client_id or not client_secret:
         raise RpcError("Discord voice controls are not set up yet, run: "
                        "python3 %s --setup" % os.path.abspath(__file__))
