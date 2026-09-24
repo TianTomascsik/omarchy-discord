@@ -3,9 +3,9 @@ type: reference
 title: Friend presence comes from inside the client, through a file
 description: With relationships.read refused to ordinary applications, a BetterDiscord plugin reads Discord's own stores and writes a private state file the widget watches
 tags: [discord, betterdiscord, presence, quickshell]
-status: draft
+status: stable
 verified:
-  - by: the plugin exercised in Node against stubbed stores, the widget side against a hand-written file; not yet against a live BetterDiscord, which was not injected on the measuring machine
+  - by: the plugin running inside a live BetterDiscord 1.12.7 on discord app-1.0.158, writing a 59-friend list with online, idle, dnd and offline statuses, and the widget reading it; the offline-to-online notification measured with a hand-written file
     at: 2026-09-24
 ---
 
@@ -55,9 +55,12 @@ straight to Node, so `{ recursive, mode }` and the temporary-then-rename
 write work as they would in Node. Home is derived from `BdApi.Plugins.folder`,
 three levels down from it, when `process.env.HOME` is not there to read.
 
-# Not yet measured
+# Measured live
 
-The plugin has run only against stubbed stores. BetterDiscord was not injected
-into the measuring machine's Discord (app-1.0.158 had no trace of it after an
-update), so the first live run will settle whether `getStatus` reports friends
-outside shared servers the way the client's own friend list does.
+With BetterDiscord injected by `betterdiscordctl install` and the plugin
+switched on in `plugins.json`, the first write landed within a minute of
+Discord starting: 59 friends, statuses `online`, `idle`, `dnd` and `offline`,
+mode 0600. `PresenceStore.getStatus` answers for friends regardless of shared
+servers, which is the client's own friend list behaving as it does on screen.
+A Discord update removes the injection; `betterdiscordctl install` puts it
+back and the plugin resumes on the next start.

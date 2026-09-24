@@ -6,6 +6,13 @@ description: What changed in this bundle and when
 
 # Log
 
+## 2026-09-24, night
+
+`betterdiscord-presence-file` moves to stable: the plugin ran inside a live
+BetterDiscord and the widget read its list. Two facts came out of getting
+there, both recorded in that file: BetterDiscord's plugin `require` has no
+`os`, and its `fs` polyfill passes options through to Node.
+
 ## 2026-09-24, evening
 
 With the RPC route closed, friend presence moved inside the client:
