@@ -45,6 +45,9 @@ class FakeRpc:
     def subscribe(self, event, args=None):
         return "0"
 
+    def unsubscribe(self, event, args=None):
+        return "0"
+
     def command(self, cmd, args=None, evt=None):
         self.commands.append((cmd, args))
         return "0"
@@ -54,7 +57,13 @@ class FakeRpc:
             return {"mute": False, "deaf": False, "input": {"volume": 100}}
         if cmd == "GET_RELATIONSHIPS":
             return {"relationships": list(getattr(self, "relationships", []))}
-        return {}
+        # answers maps a command name to its reply, or to an exception to raise
+        answer = getattr(self, "answers", {}).get(cmd)
+        if isinstance(answer, Exception):
+            raise answer
+        if callable(answer):
+            return answer(args or {})
+        return answer or {}
 
     def readable(self, timeout):
         return True
@@ -446,6 +455,124 @@ def a_relationship_event_in_the_loop_emits_the_friend():
           lines)
 
 
+def snapshot_of(bridge):
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        bridge.emit()
+    return json.loads(out.getvalue().splitlines()[-1])
+
+
+def rpc_rejected_carries_discords_code():
+    check("a refusal keeps its code", rpc.RpcRejected("nope", 4005).code == 4005)
+    check("and defaults to zero", rpc.RpcRejected("nope").code == 0)
+    check("and a None code is zero", rpc.RpcRejected("nope", None).code == 0)
+
+
+def list_channels_emits_its_own_line_kind():
+    fake = FakeRpc()
+    fake.answers = {
+        "GET_GUILDS": {"guilds": [{"id": "10", "name": "GM's Server"}, {"id": "20", "name": "Text only"}]},
+        "GET_CHANNELS": lambda args: {"channels": [
+            {"id": "1", "name": "General", "type": 2}, {"id": "2", "name": "chat", "type": 0},
+            {"id": "3", "name": "AFK", "type": 2}]} if args["guild_id"] == "10" else {"channels": [{"id": "9", "name": "chat", "type": 0}]},
+    }
+    bridge = rpc.Bridge(fake)
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        bridge.list_channels()
+    line = json.loads(out.getvalue().splitlines()[-1])
+    check("the listing is its own kind", line.get("kind") == "channels" and "ok" not in line, line)
+    check("only voice channels are listed", [c["id"] for c in line["guilds"][0]["channels"]] == ["1", "3"], line)
+    check("a guild without voice channels is left out", [g["id"] for g in line["guilds"]] == ["10"], line)
+    check("guild names are cached for later lookups", bridge.guilds.get("10") == "GM's Server", bridge.guilds)
+
+
+def a_refused_guild_listing_skips_that_guild_only():
+    fake = FakeRpc()
+    fake.answers = {
+        "GET_GUILDS": {"guilds": [{"id": "10", "name": "Refusing"}, {"id": "20", "name": "Open"}]},
+        "GET_CHANNELS": lambda args: (_ for _ in ()).throw(rpc.RpcRejected("Unauthorized", 4006)) if args["guild_id"] == "10"
+        else {"channels": [{"id": "5", "name": "Voice", "type": 2}]},
+    }
+    with captured_warnings() as warnings:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            rpc.Bridge(fake).list_channels()
+    line = json.loads(out.getvalue().splitlines()[-1])
+    check("the open guild is still listed", [g["id"] for g in line["guilds"]] == ["20"], line)
+    check("and the refusal is warned about by guild", any("10" in w for w in warnings), warnings)
+
+
+def a_join_sends_select_voice_channel_with_force_and_timeout():
+    fake = FakeRpc()
+    bridge = rpc.Bridge(fake)
+    bridge.handle_command('{"cmd":"join","channelId":"123"}')
+    check("a join is one SELECT_VOICE_CHANNEL",
+          fake.commands == [("SELECT_VOICE_CHANNEL", {"channel_id": "123", "timeout": rpc.JOIN_TIMEOUT_SEC, "force": True})],
+          fake.commands)
+    check("and its nonce is remembered against the channel", list(bridge.pending_joins.values()) == ["123"], bridge.pending_joins)
+
+
+def a_join_with_a_bad_id_never_reaches_discord():
+    fake = FakeRpc()
+    with captured_warnings() as warnings:
+        rpc.Bridge(fake).handle_command('{"cmd":"join","channelId":"general"}')
+    check("a non-numeric id is refused before Discord sees it", fake.commands == [], fake.commands)
+    check("and named in the warning", any("general" in w for w in warnings), warnings)
+
+
+def a_refused_join_lands_in_the_snapshot_with_its_code():
+    error = (rpc.OP_FRAME, {"cmd": "SELECT_VOICE_CHANNEL", "evt": "ERROR", "nonce": "0",
+                            "data": {"code": 4005, "message": "Invalid Channel Id"}})
+    fake = FakeRpc([error])
+    bridge = rpc.Bridge(fake)
+    bridge.pending_joins["0"] = "123"
+    with captured_warnings():
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            try:
+                bridge.run()
+            except rpc.RpcError:
+                pass
+    lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    check("the refusal is emitted with channel, code and message",
+          any(line.get("joinError") == {"channelId": "123", "code": 4005, "message": "Invalid Channel Id"} for line in lines), lines)
+    check("and the nonce is forgotten", bridge.pending_joins == {}, bridge.pending_joins)
+
+
+def a_join_reply_clears_the_pending_nonce():
+    reply = (rpc.OP_FRAME, {"cmd": "SELECT_VOICE_CHANNEL", "nonce": "0", "data": {"id": "123"}})
+    bridge = rpc.Bridge(FakeRpc([reply]))
+    bridge.pending_joins["0"] = "123"
+    with contextlib.redirect_stdout(io.StringIO()):
+        try:
+            bridge.run()
+        except rpc.RpcError:
+            pass
+    check("a successful reply forgets the nonce without an error", bridge.pending_joins == {} and bridge.state["joinError"] == {})
+
+
+def a_channel_select_clears_the_join_error_and_names_the_id():
+    fake = FakeRpc()
+    fake.answers = {"GET_CHANNEL": {"name": "General", "guild_id": "10", "voice_states": []}, "GET_GUILD": {"name": "GM's Server"}}
+    bridge = rpc.Bridge(fake)
+    bridge.state["joinError"] = {"channelId": "123", "code": 4005, "message": "x"}
+    bridge.select_channel("123")
+    check("landing in a channel clears the error", bridge.state["joinError"] == {})
+    check("and the snapshot names the selected id", bridge.state["channelId"] == "123")
+    bridge.select_channel(None)
+    check("leaving empties the id", bridge.state["channelId"] == "")
+
+
+def refresh_counts_only_the_channels_it_is_asked_about():
+    fake = FakeRpc()
+    fake.answers = {
+        "GET_SELECTED_VOICE_CHANNEL": {},
+        "GET_CHANNEL": lambda args: {"1": {"voice_states": [{}, {}]}, "2": {"voice_states": []}}.get(args["channel_id"])
+        or (_ for _ in ()).throw(rpc.RpcRejected("Unknown Channel", 4005)),
+    }
+    bridge = rpc.Bridge(fake)
+    with contextlib.redirect_stdout(io.StringIO()):
+        bridge.handle_command('{"cmd":"refresh","channels":["1","2","3","general"]}')
+    check("counts come back per channel", bridge.state["channelCounts"] == {"1": 2, "2": 0}, bridge.state["channelCounts"])
+
+
 def has_scope_reads_discords_space_separated_list():
     token = {"scope": "rpc rpc.voice.read relationships.read"}
     check("a granted scope is found", rpc.has_scope(token, "relationships.read"))
@@ -474,6 +601,15 @@ def main():
                  a_refused_friend_list_leaves_voice_alone,
                  a_relationship_event_in_the_loop_emits_the_friend,
                  has_scope_reads_discords_space_separated_list,
+                 rpc_rejected_carries_discords_code,
+                 list_channels_emits_its_own_line_kind,
+                 a_refused_guild_listing_skips_that_guild_only,
+                 a_join_sends_select_voice_channel_with_force_and_timeout,
+                 a_join_with_a_bad_id_never_reaches_discord,
+                 a_refused_join_lands_in_the_snapshot_with_its_code,
+                 a_join_reply_clears_the_pending_nonce,
+                 a_channel_select_clears_the_join_error_and_names_the_id,
+                 refresh_counts_only_the_channels_it_is_asked_about,
                  a_cached_token_is_never_reprompted,
                  a_first_authorization_asks_for_voice_only_once,
                  a_refused_authorization_is_fatal_not_a_loop,

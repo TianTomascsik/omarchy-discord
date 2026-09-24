@@ -42,6 +42,14 @@ Item {
   property string friendsError: ""
   // "granted", "missing" (never asked) or "refused" (Discord said no, friendsError says why).
   property string friendsScope: "missing"
+  // The channel the client sits in, by id, so a favourite reads as joined by identity and not by name.
+  property string channelId: ""
+  // {"123": 2} occupancy for the favourites the last refresh asked about.
+  property var channelCounts: ({})
+  // {"channelId":"123","code":4005,"message":"..."} for the last refused join, empty otherwise.
+  property var joinError: ({})
+  // [{id, name, channels:[{id, name}]}] once listChannels() has been answered; cached per bridge session.
+  property var channelGuilds: []
 
   // Not error === "": rpc.py warns on stderr about refusals it survives, and a warning is not a disconnect.
   readonly property bool connected: ready
@@ -57,6 +65,10 @@ Item {
     voiceState = ""
     friends = []
     friendsOk = false
+    channelId = ""
+    channelCounts = {}
+    joinError = {}
+    channelGuilds = []
   }
 
   // Setup happens while the shell runs, so opening the panel re-checks; a refused authorization is not re-asked.
@@ -84,12 +96,20 @@ Item {
   function setInputVolume(value) { send({ cmd: "inputVolume", value: Math.round(value) }) }
   function grantFriends() { send({ cmd: "grantFriends" }) }
   function hangUp() { send({ cmd: "disconnect" }) }
-  function refresh() { send({ cmd: "refresh" }) }
+  function refresh(channelIds) { send({ cmd: "refresh", channels: channelIds instanceof Array ? channelIds : [] }) }
+  function join(channelId) { send({ cmd: "join", channelId: String(channelId) }) }
+  function listChannels() { send({ cmd: "listChannels" }) }
 
-  // lines look like {"ok":true,"channel":"General","guild":"GM's Server","mute":false,"deaf":false,"inputVolume":100,"speaking":["gm"],"error":"","ping":36,"voiceState":"VOICE_CONNECTED","friends":[],"friendsOk":true,"friendsError":""}
+  // lines look like {"ok":true,"channel":"General","guild":"GM's Server","mute":false,"deaf":false,"inputVolume":100,"speaking":["gm"],"error":"","ping":36,"voiceState":"VOICE_CONNECTED","friends":[],"friendsOk":true,"friendsError":"","channelId":"1","channelCounts":{"1":2},"joinError":{}}
   function applyLine(line) {
     var state = Model.parseRpcLine(line)
     if (!state) return
+
+    // A listing is its own line kind and must never be read as a snapshot, which would blank the call.
+    if (state.kind === "channels") {
+      root.channelGuilds = state.guilds instanceof Array ? state.guilds : []
+      return
+    }
 
     if (state.ok === false) {
       // Only the unconfigured line says the tier can never work; any other error got past that check.
@@ -118,6 +138,9 @@ Item {
     root.friendsOk = state.friendsOk === true
     root.friendsError = String(state.friendsError || "")
     root.friendsScope = String(state.friendsScope || "missing")
+    root.channelId = String(state.channelId || "")
+    root.channelCounts = state.channelCounts && typeof state.channelCounts === "object" ? state.channelCounts : {}
+    root.joinError = state.joinError && typeof state.joinError === "object" ? state.joinError : {}
     root.unauthorized = false
     root.ready = true
     root.restarts = 0
@@ -145,10 +168,13 @@ Item {
     }
 
     // Fatal failures arrive as JSON on stdout, so a line here is a warning worth showing.
+    // Every warning the bridge prints is also worth a line in the shell log, where support looks.
     stderr: SplitParser {
       onRead: function (line) {
         var text = String(line).trim()
-        if (text !== "") root.error = text
+        if (text === "") return
+        root.error = text
+        console.warn("omarchy-discord bridge: " + text)
       }
     }
 

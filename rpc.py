@@ -28,6 +28,10 @@ SCOPES = BASE_SCOPES + [FRIENDS_SCOPE]
 RELATIONSHIP_FRIEND = 1
 # Anything else Discord reports, including invisible, reads as offline to a watcher.
 REACHABLE_STATUSES = ("online", "idle", "dnd")
+# Discord's channel types: 2 is a guild voice channel, the only kind the picker lists.
+CHANNEL_VOICE = 2
+# A join right after a cold start may wait for the voice engine; Discord caps this at 60.
+JOIN_TIMEOUT_SEC = 30
 REDIRECT_URI = "http://localhost/omarchy-discord"
 
 # Discord numbers its sockets when several clients run; one instance uses 0.
@@ -65,6 +69,10 @@ class RpcError(Exception):
 
 class RpcRejected(RpcError):
     """Discord refused one command; the connection itself is still good."""
+
+    def __init__(self, message, code=0):
+        RpcError.__init__(self, message)
+        self.code = int(code or 0)
 
 
 class AuthorizationFailed(RpcError):
@@ -258,7 +266,8 @@ class Rpc:
                     self.deferred.append(payload)
                 continue
             if payload.get("evt") == "ERROR":
-                raise RpcRejected((payload.get("data") or {}).get("message", "RPC error"))
+                data = payload.get("data") or {}
+                raise RpcRejected(data.get("message", "RPC error"), data.get("code"))
             return payload.get("data") or {}
 
 
@@ -402,20 +411,69 @@ class Bridge:
         self.speaking = set()
         self.guilds = {}
         self.friends = {}
+        # nonce -> channel id, so a refusal can be tied back to the join that asked.
+        self.pending_joins = {}
+        # The favourites the widget wants occupancy for, sent with each refresh.
+        self.counted = []
         self.state = {"ok": True, "channel": "", "guild": "", "mute": False,
                       "deaf": False, "inputVolume": 100,
                       "speaking": [], "error": "",
                       "ping": 0, "voiceState": "",
                       "friends": [], "friendsOk": False, "friendsError": "",
-                      "friendsScope": friends_scope}
+                      "friendsScope": friends_scope,
+                      "channelId": "", "channelCounts": {}, "joinError": {}}
+
+    def emit_line(self, payload):
+        sys.stdout.write(json.dumps(payload) + "\n")
+        sys.stdout.flush()
 
     def emit(self):
         self.state["speaking"] = sorted(
             self.members.get(user_id, user_id) for user_id in self.speaking)
         self.state["friends"] = sorted(self.friends.values(),
                                        key=lambda friend: friend["name"].lower())
-        sys.stdout.write(json.dumps(self.state) + "\n")
-        sys.stdout.flush()
+        self.emit_line(self.state)
+
+    # {"kind":"channels","guilds":[{"id":"1","name":"GM's Server","channels":[{"id":"2","name":"General"}]}]}
+    def list_channels(self):
+        """Every guild voice channel, in Discord's order, on a line of its own kind so no snapshot is disturbed."""
+        guilds = []
+        for guild in self.rpc.request("GET_GUILDS").get("guilds") or []:
+            guild_id = str(guild.get("id") or "")
+            if not guild_id:
+                continue
+            self.guilds[guild_id] = guild.get("name", "")
+            try:
+                listing = self.rpc.request("GET_CHANNELS", {"guild_id": guild_id})
+            except RpcRejected as error:
+                warn("Discord refused the channels of %s: %s" % (guild_id, error))
+                continue
+            voice = [{"id": str(channel.get("id")), "name": channel.get("name", "")}
+                     for channel in listing.get("channels") or []
+                     if channel.get("type") == CHANNEL_VOICE and channel.get("id")]
+            if voice:
+                guilds.append({"id": guild_id, "name": guild.get("name", ""), "channels": voice})
+        self.emit_line({"kind": "channels", "guilds": guilds})
+
+    # A refused channel is left out, so a missing key reads as unknown rather than empty.
+    def load_counts(self):
+        counts = {}
+        for channel_id in self.counted:
+            try:
+                channel = self.rpc.request("GET_CHANNEL", {"channel_id": channel_id})
+            except RpcRejected:
+                continue
+            counts[channel_id] = len(channel.get("voice_states") or [])
+        self.state["channelCounts"] = counts
+
+    def join(self, channel_id):
+        """One SELECT_VOICE_CHANNEL, fire and forget; the reply is matched by nonce in run()."""
+        nonce = self.rpc.command("SELECT_VOICE_CHANNEL",
+                                 {"channel_id": channel_id, "timeout": JOIN_TIMEOUT_SEC, "force": True})
+        self.pending_joins[nonce] = channel_id
+        if self.state["joinError"]:
+            self.state["joinError"] = {}
+            self.emit()
 
     def apply_relationship(self, data):
         user_id, entry = friend_entry(data)
@@ -468,11 +526,14 @@ class Bridge:
     def select_channel(self, channel_id):
         self.speaking.clear()
         self.members.clear()
+        self.state["channelId"] = str(channel_id or "")
         if not channel_id:
             self.state["channel"] = ""
             self.state["guild"] = ""
             self.resubscribe(None)
             return
+        # Landing in a channel settles any join that was still being reported as refused.
+        self.state["joinError"] = {}
         channel = self.rpc.request("GET_CHANNEL", {"channel_id": channel_id})
         self.state["channel"] = channel.get("name", "")
         self.state["guild"] = self.guild_name(channel.get("guild_id"))
@@ -540,7 +601,17 @@ class Bridge:
             self.rpc.command("SET_VOICE_SETTINGS", {"input": {"volume": volume}})
         elif name == "disconnect":
             self.rpc.command("SELECT_VOICE_CHANNEL", {"channel_id": None, "force": True})
+        elif name == "join":
+            channel_id = str(message.get("channelId") or "")
+            if not channel_id.isdigit():
+                warn("join needs a channel id, got %r" % clip(channel_id, WARN_INPUT_CHARS))
+                return
+            self.join(channel_id)
+        elif name == "listChannels":
+            self.list_channels()
         elif name == "refresh":
+            # {"cmd": "refresh", "channels": ["1", "2"]} names the favourites to count.
+            self.counted = [str(c) for c in (message.get("channels") or []) if str(c).isdigit()]
             self.refresh()
         elif name == "grantFriends":
             self.grant_friends()
@@ -582,6 +653,7 @@ class Bridge:
         selected = self.rpc.request("GET_SELECTED_VOICE_CHANNEL")
         self.select_channel(selected.get("id") if selected else None)
         self.load_friends()
+        self.load_counts()
         self.emit()
 
     # This thread owns the socket outright; nothing else reads or writes it.
@@ -602,7 +674,16 @@ class Bridge:
             if op == OP_PING:
                 self.rpc.send(OP_PONG, payload)
                 continue
-            # Nobody is waiting on a fire and forget command, so warn here.
+            # A join's reply is the one fire and forget answer the widget waits for.
+            pending = self.pending_joins.pop(payload.get("nonce"), None)
+            if pending is not None and payload.get("evt") == "ERROR":
+                data = payload.get("data") or {}
+                self.state["joinError"] = {"channelId": pending, "code": int(data.get("code") or 0),
+                                           "message": data.get("message", "")}
+                warn("Discord refused joining %s: %s" % (pending, data.get("message", "unknown error")))
+                self.emit()
+                continue
+            # Nobody is waiting on any other fire and forget command, so warn here.
             if payload.get("evt") == "ERROR":
                 warn("Discord refused %s: %s"
                      % (payload.get("cmd"),
