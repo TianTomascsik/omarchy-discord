@@ -20,7 +20,14 @@ API = "https://discord.com/api"
 PORTAL = "https://discord.com/developers/applications"
 # Discord's edge answers the default Python user agent with a bare 403.
 USER_AGENT = "omarchy-discord (https://github.com/thisisgm/omarchy-discord, 1.0)"
-SCOPES = ["rpc", "rpc.voice.read", "rpc.voice.write"]
+BASE_SCOPES = ["rpc", "rpc.voice.read", "rpc.voice.write"]
+# Friend presence rides GET_RELATIONSHIPS and RELATIONSHIP_UPDATE, both behind this one scope.
+FRIENDS_SCOPE = "relationships.read"
+SCOPES = BASE_SCOPES + [FRIENDS_SCOPE]
+# Discord's relationship types: 1 is a friend; requests, blocks and implicit ones are not.
+RELATIONSHIP_FRIEND = 1
+# Anything else Discord reports, including invisible, reads as offline to a watcher.
+REACHABLE_STATUSES = ("online", "idle", "dnd")
 REDIRECT_URI = "http://localhost/omarchy-discord"
 
 # Discord numbers its sockets when several clients run; one instance uses 0.
@@ -131,6 +138,11 @@ def load_token():
             return json.load(handle)
     except (OSError, ValueError):
         return {}
+
+
+# Discord returns "scope":"rpc rpc.voice.read rpc.voice.write relationships.read"
+def has_scope(token, scope):
+    return scope in str((token or {}).get("scope", "")).split()
 
 
 def save_token(token):
@@ -267,9 +279,9 @@ def handshake(rpc, client_id):
             return payload.get("data") or {}
 
 
-def authorize(rpc, client_id, client_secret):
+def authorize(rpc, client_id, client_secret, scopes):
     """One-time consent: Discord shows a modal, then the code buys a token."""
-    data = rpc.request("AUTHORIZE", {"client_id": client_id, "scopes": SCOPES})
+    data = rpc.request("AUTHORIZE", {"client_id": client_id, "scopes": list(scopes)})
     code = data.get("code")
     if not code:
         raise RpcError("Discord did not return an authorization code")
@@ -292,23 +304,92 @@ def valid_token(client_id, client_secret):
     return None
 
 
+def obtain_token(rpc, client_id, client_secret):
+    """A cached token that covers friends wins; otherwise ask for friends once, then settle for voice."""
+    token = valid_token(client_id, client_secret)
+    if token and (has_scope(token, FRIENDS_SCOPE) or token.get("friendsRefused")):
+        return token
+    try:
+        return authorize(rpc, client_id, client_secret, SCOPES)
+    except RpcError as error:
+        warn("Discord refused the %s scope, friend presence is off: %s" % (FRIENDS_SCOPE, error))
+    if not token:
+        token = authorize(rpc, client_id, client_secret, BASE_SCOPES)
+    # Remembered so a refused scope does not raise Discord's consent modal on every connect.
+    token["friendsRefused"] = True
+    save_token(token)
+    return token
+
+
+# {"type": 1, "user": {"id": "1", "username": "gm", "global_name": "GM"}, "presence": {"status": "online"}}
+def friend_entry(data):
+    """The (id, entry) a relationship payload describes; entry is None when it is not a friend."""
+    user = data.get("user") or {}
+    user_id = str(user.get("id") or data.get("id") or "")
+    if not user_id:
+        return "", None
+    if data.get("type") != RELATIONSHIP_FRIEND:
+        return user_id, None
+    presence = data.get("presence") or {}
+    status = str(presence.get("status") or "offline").lower()
+    if status not in REACHABLE_STATUSES:
+        status = "offline"
+    name = user.get("global_name") or user.get("username") or user_id
+    return user_id, {"id": user_id, "name": str(name), "status": status}
+
+
 class Bridge:
-    def __init__(self, rpc):
+    def __init__(self, rpc, friends_enabled=True):
         self.rpc = rpc
+        self.friends_enabled = friends_enabled
         self.subscribed_channel = None
         self.members = {}
         self.speaking = set()
         self.guilds = {}
+        self.friends = {}
         self.state = {"ok": True, "channel": "", "guild": "", "mute": False,
                       "deaf": False, "inputVolume": 100,
                       "speaking": [], "error": "",
-                      "ping": 0, "voiceState": ""}
+                      "ping": 0, "voiceState": "",
+                      "friends": [], "friendsOk": False, "friendsError": ""}
 
     def emit(self):
         self.state["speaking"] = sorted(
             self.members.get(user_id, user_id) for user_id in self.speaking)
+        self.state["friends"] = sorted(self.friends.values(),
+                                       key=lambda friend: friend["name"].lower())
         sys.stdout.write(json.dumps(self.state) + "\n")
         sys.stdout.flush()
+
+    def apply_relationship(self, data):
+        user_id, entry = friend_entry(data)
+        if not user_id:
+            return False
+        if entry is None:
+            return self.friends.pop(user_id, None) is not None
+        if self.friends.get(user_id) == entry:
+            return False
+        self.friends[user_id] = entry
+        return True
+
+    # A refused GET_RELATIONSHIPS is reported in the state; the voice tier carries on regardless.
+    def load_friends(self):
+        self.friends = {}
+        if not self.friends_enabled:
+            self.state["friendsOk"] = False
+            self.state["friendsError"] = "Friend presence needs the %s scope" % FRIENDS_SCOPE
+            return
+        try:
+            listing = self.rpc.request("GET_RELATIONSHIPS")
+            for entry in listing.get("relationships") or []:
+                self.apply_relationship(entry)
+            self.rpc.subscribe("RELATIONSHIP_UPDATE")
+        except RpcRejected as error:
+            self.state["friendsOk"] = False
+            self.state["friendsError"] = "Discord refused friend presence: %s" % error
+            return
+        self.state["friendsOk"] = True
+        self.state["friendsError"] = ""
 
     def apply_voice_settings(self, data):
         self.state["mute"] = bool(data.get("mute"))
@@ -377,6 +458,8 @@ class Bridge:
             self.speaking.add(data.get("user_id"))
         elif event == "SPEAKING_STOP":
             self.speaking.discard(data.get("user_id"))
+        elif event == "RELATIONSHIP_UPDATE":
+            return self.apply_relationship(data)
         else:
             return False
         return True
@@ -427,6 +510,7 @@ class Bridge:
         self.apply_voice_settings(self.rpc.request("GET_VOICE_SETTINGS"))
         selected = self.rpc.request("GET_SELECTED_VOICE_CHANNEL")
         self.select_channel(selected.get("id") if selected else None)
+        self.load_friends()
         self.emit()
 
     # This thread owns the socket outright; nothing else reads or writes it.
@@ -472,9 +556,9 @@ def session():
     rpc = Rpc(connect_socket())
     try:
         handshake(rpc, client_id)
-        token = valid_token(client_id, client_secret) or authorize(rpc, client_id, client_secret)
+        token = obtain_token(rpc, client_id, client_secret)
         rpc.request("AUTHENTICATE", {"access_token": token["access_token"]})
-        Bridge(rpc).run()
+        Bridge(rpc, friends_enabled=has_scope(token, FRIENDS_SCOPE)).run()
     finally:
         rpc.close()
 
@@ -496,7 +580,10 @@ def probe():
         ready = handshake(rpc, client_id)
         print("handshake: ok, Discord reports user %s"
               % (ready.get("user") or {}).get("username", "unknown"))
-        print("token cached: %s" % bool(load_token().get("access_token")))
+        token = load_token()
+        print("token cached: %s" % bool(token.get("access_token")))
+        print("friend presence: %s" % ("granted" if has_scope(token, FRIENDS_SCOPE)
+                                        else "not granted, see README"))
         return 0
     except RpcError as error:
         print("handshake: %s" % error)
@@ -611,10 +698,19 @@ def setup():
     print("Discord will now ask you to authorize it. Approve that prompt.\n")
     try:
         ready = handshake(rpc, client_id)
-        token = valid_token(client_id, client_secret) or authorize(rpc, client_id, client_secret)
+        token = valid_token(client_id, client_secret)
+        # --setup is the retry path for a refused friends scope, so it always asks again.
+        if not token or not has_scope(token, FRIENDS_SCOPE):
+            token.pop("friendsRefused", None) if token else None
+            token = obtain_token(rpc, client_id, client_secret)
         rpc.request("AUTHENTICATE", {"access_token": token["access_token"]})
         print("Ready. Authenticated as %s."
               % (ready.get("user") or {}).get("username", "your account"))
+        if has_scope(token, FRIENDS_SCOPE):
+            print("Friend presence is on: pick who to watch in the panel's Friends section.")
+        else:
+            print("Friend presence is off: Discord did not grant %s to this application."
+                  % FRIENDS_SCOPE)
         print("Open the Discord panel in the bar and the call controls are there.")
         return 0
     except RpcError as error:

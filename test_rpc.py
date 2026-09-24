@@ -6,6 +6,7 @@ Run with: python3 test_rpc.py
 
 import contextlib
 import io
+import json
 import os
 import stat
 import sys
@@ -41,6 +42,8 @@ class FakeRpc:
     def request(self, cmd, args=None, evt=None):
         if cmd == "GET_VOICE_SETTINGS":
             return {"mute": False, "deaf": False, "input": {"volume": 100}}
+        if cmd == "GET_RELATIONSHIPS":
+            return {"relationships": list(getattr(self, "relationships", []))}
         return {}
 
     def readable(self, timeout):
@@ -205,6 +208,118 @@ def a_refusal_is_still_an_rpc_error():
           issubclass(rpc.RpcRejected, rpc.RpcError))
 
 
+def relationship(kind, user_id, status=None, **user):
+    """A RELATIONSHIP_UPDATE payload, or one GET_RELATIONSHIPS entry, as Discord shapes it."""
+    payload = {"type": kind, "user": dict(user, id=user_id)}
+    if status is not None:
+        payload["presence"] = {"status": status}
+    return payload
+
+
+def a_friend_entry_reads_name_and_presence():
+    user_id, entry = rpc.friend_entry(
+        relationship(rpc.RELATIONSHIP_FRIEND, "1", "idle", username="gm", global_name="GM"))
+    check("a friend keeps its id", user_id == "1", user_id)
+    check("the display name wins over the username", entry["name"] == "GM", entry)
+    check("idle is a reachable status", entry["status"] == "idle", entry)
+    _, plain = rpc.friend_entry(relationship(rpc.RELATIONSHIP_FRIEND, "2", "online", username="gm"))
+    check("without a display name the username is used", plain["name"] == "gm", plain)
+
+
+def unreachable_presences_read_as_offline():
+    """The watcher only fires on reachable, so invisible and unknown must collapse to offline."""
+    for status in ("invisible", "unknown", None):
+        _, entry = rpc.friend_entry(relationship(rpc.RELATIONSHIP_FRIEND, "1", status, username="gm"))
+        check("%r reads as offline" % (status,), entry["status"] == "offline", entry)
+
+
+def a_non_friend_relationship_is_not_a_friend():
+    """Requests and blocks arrive on the same event and must never show up in the list."""
+    for kind in (0, 2, 3, 4, 5):
+        user_id, entry = rpc.friend_entry(relationship(kind, "9", "online", username="stranger"))
+        check("type %d is not a friend" % kind, user_id == "9" and entry is None, entry)
+    user_id, entry = rpc.friend_entry({"type": 1, "presence": {"status": "online"}})
+    check("a payload without a user is ignored", user_id == "" and entry is None, entry)
+
+
+def the_bridge_tracks_relationship_updates():
+    bridge = rpc.Bridge(FakeRpc())
+    added = bridge.apply_relationship(relationship(1, "1", "offline", username="gm"))
+    same = bridge.apply_relationship(relationship(1, "1", "offline", username="gm"))
+    changed = bridge.apply_relationship(relationship(1, "1", "online", username="gm"))
+    removed = bridge.apply_relationship(relationship(0, "1", username="gm"))
+    check("a new friend is a change", added)
+    check("an identical update is not", not same)
+    check("a presence change is", changed)
+    check("an unfriend removes the entry", removed and bridge.friends == {}, bridge.friends)
+
+
+def load_friends_lists_and_subscribes():
+    fake = FakeRpc()
+    fake.relationships = [relationship(1, "2", "online", username="zed"),
+                          relationship(1, "1", "offline", username="amy"),
+                          relationship(3, "3", "online", username="pending")]
+    subscribed = []
+    fake.subscribe = lambda event, args=None: subscribed.append(event) or "0"
+    bridge = rpc.Bridge(fake)
+    bridge.load_friends()
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        bridge.emit()
+    state = json.loads(out.getvalue())
+    check("friends are listed sorted by name",
+          [f["name"] for f in state["friends"]] == ["amy", "zed"], state["friends"])
+    check("a pending request is left out", all(f["id"] != "3" for f in state["friends"]))
+    check("the bridge subscribes to relationship updates",
+          subscribed == ["RELATIONSHIP_UPDATE"], subscribed)
+    check("friendsOk is reported", state["friendsOk"] is True and state["friendsError"] == "", state)
+
+
+def a_refused_friend_list_leaves_voice_alone():
+    """The whole point of the fallback: no relationships.read must never cost the call controls."""
+
+    class RefusingRpc(FakeRpc):
+        def request(self, cmd, args=None, evt=None):
+            if cmd == "GET_RELATIONSHIPS":
+                raise rpc.RpcRejected("Unauthorized")
+            return FakeRpc.request(self, cmd, args, evt)
+
+    bridge = rpc.Bridge(RefusingRpc())
+    bridge.load_friends()
+    check("a refusal is reported by name", "Unauthorized" in bridge.state["friendsError"], bridge.state)
+    check("and friendsOk is false", bridge.state["friendsOk"] is False)
+    check("and the session itself is still ok", bridge.state["ok"] is True)
+
+    disabled = rpc.Bridge(FakeRpc(), friends_enabled=False)
+    disabled.load_friends()
+    check("without the scope the reason names the scope",
+          rpc.FRIENDS_SCOPE in disabled.state["friendsError"], disabled.state)
+
+
+def a_relationship_event_in_the_loop_emits_the_friend():
+    frame = (rpc.OP_FRAME, {"cmd": "DISPATCH", "evt": "RELATIONSHIP_UPDATE",
+                            "data": relationship(1, "1", "online", username="gm")})
+    bridge = rpc.Bridge(FakeRpc([frame]))
+    while not rpc.COMMANDS.empty():
+        rpc.COMMANDS.get_nowait()
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        try:
+            bridge.run()
+        except rpc.RpcError:
+            pass
+    lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    check("the event reaches stdout as a friend",
+          any(f["id"] == "1" and f["status"] == "online" for line in lines for f in line["friends"]),
+          lines)
+
+
+def has_scope_reads_discords_space_separated_list():
+    token = {"scope": "rpc rpc.voice.read relationships.read"}
+    check("a granted scope is found", rpc.has_scope(token, "relationships.read"))
+    check("a prefix is not a scope", not rpc.has_scope(token, "rpc.voice"))
+    check("a missing token has no scopes", not rpc.has_scope({}, "rpc"))
+    check("None is tolerated", not rpc.has_scope(None, "rpc"))
+
+
 def main():
     for case in (leftover_temporary_cannot_widen_a_secret,
                  a_symlink_cannot_redirect_the_token,
@@ -216,7 +331,15 @@ def main():
                  the_public_key_is_refused_as_a_secret,
                  a_clipped_warning_marks_the_cut,
                  a_refusal_warning_clips_the_command,
-                 a_refusal_is_still_an_rpc_error):
+                 a_refusal_is_still_an_rpc_error,
+                 a_friend_entry_reads_name_and_presence,
+                 unreachable_presences_read_as_offline,
+                 a_non_friend_relationship_is_not_a_friend,
+                 the_bridge_tracks_relationship_updates,
+                 load_friends_lists_and_subscribes,
+                 a_refused_friend_list_leaves_voice_alone,
+                 a_relationship_event_in_the_loop_emits_the_friend,
+                 has_scope_reads_discords_space_separated_list):
         case()
     print("\n%d failed" % len(FAILURES) if FAILURES else "\nall passed")
     return 1 if FAILURES else 0

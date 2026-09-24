@@ -33,6 +33,10 @@ Item {
   property var speaking: []
   property int ping: 0
   property string voiceState: ""
+  // Entries look like {"id":"80351110224678912","name":"gm","status":"online"}; empty without relationships.read.
+  property var friends: []
+  property bool friendsOk: false
+  property string friendsError: ""
 
   // Not error === "": rpc.py warns on stderr about refusals it survives, and a warning is not a disconnect.
   readonly property bool connected: ready
@@ -46,6 +50,8 @@ Item {
     speaking = []
     ping = 0
     voiceState = ""
+    friends = []
+    friendsOk = false
   }
 
   // Setup happens while the shell runs, so opening the panel re-checks.
@@ -67,7 +73,7 @@ Item {
   function hangUp() { send({ cmd: "disconnect" }) }
   function refresh() { send({ cmd: "refresh" }) }
 
-  // lines look like {"ok":true,"channel":"General","guild":"GM's Server","mute":false,"deaf":false,"inputVolume":100,"speaking":["gm"],"error":"","ping":36,"voiceState":"VOICE_CONNECTED"}
+  // lines look like {"ok":true,"channel":"General","guild":"GM's Server","mute":false,"deaf":false,"inputVolume":100,"speaking":["gm"],"error":"","ping":36,"voiceState":"VOICE_CONNECTED","friends":[],"friendsOk":true,"friendsError":""}
   function applyLine(line) {
     var state = Model.parseRpcLine(line)
     if (!state) return
@@ -92,6 +98,9 @@ Item {
     root.speaking = state.speaking instanceof Array ? state.speaking : []
     root.ping = Math.round(Number(state.ping) || 0)
     root.voiceState = String(state.voiceState || "")
+    root.friends = state.friends instanceof Array ? state.friends : []
+    root.friendsOk = state.friendsOk === true
+    root.friendsError = String(state.friendsError || "")
     root.ready = true
     root.restarts = 0
   }
