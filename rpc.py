@@ -324,7 +324,8 @@ def obtain_token(rpc, client_id, client_secret):
     try:
         return authorize(rpc, client_id, client_secret, BASE_SCOPES)
     except RpcError as error:
-        raise AuthorizationFailed("Discord authorization failed: %s.%s" % (error, authorization_hint(error)))
+        raise AuthorizationFailed("Discord authorization failed: %s.%s"
+                                  % (str(error).rstrip("."), authorization_hint(error)))
 
 
 # "granted" runs the friend list, "missing" offers the upgrade, "refused" carries Discord's last answer.
