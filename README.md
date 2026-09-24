@@ -147,6 +147,13 @@ By default the move is silent and you stay where you are. The **Switch to it**
 toggle, shown once a workspace is picked, follows the window instead. `Enter`
 on the row steps through the workspaces for keyboard use.
 
+Silent takes one extra step on Omarchy. Discord activates its own window
+about a second after it appears, and Omarchy's Hyprland config has
+`focus_on_activate` on, so the compositor would follow it anyway. The plugin
+therefore turns that property off on the new window for eight seconds and
+puts it back, which is long enough for Discord to finish arriving and short
+enough that clicking a Discord notification still works as before.
+
 The same two values from a shell:
 
 ```bash

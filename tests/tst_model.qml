@@ -134,6 +134,14 @@ TestCase {
       'hl.dsp.window.move({ workspace = "5", window = "address:0x1", follow = true })')
   }
 
+  function test_propDispatch_sets_a_window_property_in_both_syntaxes() {
+    compare(Model.propDispatch("0x1", "focus_on_activate", "0", true),
+      'hl.dsp.window.set_prop({ window = "address:0x1", prop = "focus_on_activate", value = "0" })')
+    compare(Model.propDispatch("1", "focus_on_activate", "unset", false), "setprop address:0x1 focus_on_activate unset")
+    compare(Model.propDispatch("", "focus_on_activate", "0", true), "")
+    compare(Model.propDispatch("0x1", "", "0", true), "")
+  }
+
   function test_moveDispatch_is_empty_without_a_target_or_a_preset() {
     compare(Model.moveDispatch("0x1", "", false, true), "")
     compare(Model.moveDispatch("", "5", false, true), "")
@@ -153,6 +161,32 @@ TestCase {
     verify(Model.onWorkspace({ workspace: { id: -1, name: "chat" } }, "chat"))
     verify(!Model.onWorkspace(null, "5"))
     verify(!Model.onWorkspace({ workspace: { id: 5, name: "5" } }, ""))
+    verify(Model.sameWorkspace("1", "1"))
+    verify(!Model.sameWorkspace("", "1"))
+  }
+
+  // Measured: "55d28f0c6820,1,discord,Friends - Discord" is what Hyprland 0.56 sends for Discord's first window.
+  function test_parseOpenWindow_splits_three_fields_and_keeps_the_title_whole() {
+    var opened = Model.parseOpenWindow("55d28f0c6820,1,discord,Friends, DMs - Discord")
+    compare(opened.address, "55d28f0c6820")
+    compare(opened.workspace, "1")
+    compare(opened.appClass, "discord")
+    compare(opened.title, "Friends, DMs - Discord")
+    compare(Model.parseOpenWindow("55d28f0c6820,1"), null)
+    compare(Model.parseOpenWindow(""), null)
+  }
+
+  // Measured on a cold start: "Discord Updater" opens first and the main window arrives while it is still there.
+  function test_otherWindows_tells_a_first_window_from_a_second_and_ignores_the_splash() {
+    var splash = { address: "0x1", title: "Discord Updater" }
+    var main = { address: "0x2", title: "Discord" }
+    compare(Model.otherWindows([], "1").length, 0)
+    compare(Model.otherWindows([splash], "2").length, 0)
+    compare(Model.otherWindows([main], "2").length, 0)
+    compare(Model.otherWindows([main], "3").length, 1)
+    compare(Model.otherWindows([splash, main], "3").length, 1)
+    verify(Model.isSplash(" Discord Updater "))
+    verify(!Model.isSplash("Friends - Discord"))
   }
 
   function test_workspaceOptions_lists_any_ten_numbers_then_named_ones() {

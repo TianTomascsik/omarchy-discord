@@ -186,10 +186,44 @@ Item {
   }
 
   // Runs once when Discord's first window appears, whichever launcher opened it.
-  function placeWindow(toplevel) {
-    if (workspacePreset === "" || !toplevel || !toplevel.address) return
-    if (Model.onWorkspace(toplevel, workspacePreset)) return
-    dispatch(Model.moveDispatch(toplevel.address, workspacePreset, followWorkspace, Hyprland.usingLua))
+  function placeWindow(address, currentWorkspace) {
+    if (workspacePreset === "" || !address) return
+    if (Model.sameWorkspace(currentWorkspace, workspacePreset)) return
+    dispatch(Model.moveDispatch(address, workspacePreset, followWorkspace, Hyprland.usingLua))
+    if (!followWorkspace) holdActivation(address)
+  }
+
+  // Discord activates itself about a second after its window maps, and Omarchy's focus_on_activate would follow it.
+  readonly property int activationGraceMs: 8000
+  property var heldWindows: []
+
+  function holdActivation(address) {
+    dispatch(Model.propDispatch(address, "focus_on_activate", "0", Hyprland.usingLua))
+    heldWindows = heldWindows.concat([address])
+    activationTimer.restart()
+  }
+
+  Timer {
+    id: activationTimer
+    interval: root.activationGraceMs
+    onTriggered: {
+      for (var i = 0; i < root.heldWindows.length; i++) {
+        root.dispatch(Model.propDispatch(root.heldWindows[i], "focus_on_activate", "unset", Hyprland.usingLua))
+      }
+      root.heldWindows = []
+    }
+  }
+
+  // Hyprland's openwindow event names class and address before Quickshell's model carries the window.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name !== "openwindow") return
+      var opened = Model.parseOpenWindow(event.data)
+      if (!opened || !Model.isAppId(opened.appClass)) return
+      if (Model.otherWindows(root.windows, opened.address).length > 0) return
+      root.placeWindow(opened.address, opened.workspace)
+    }
   }
 
   // Electron hands a re-launch to the running process, which unhides a tray-hidden instance.
@@ -291,9 +325,6 @@ Item {
     }
   }
 
-  // A window appearing or closing changes what the poll would say; a first window also takes the preset.
-  onHasWindowChanged: {
-    refresh()
-    if (hasWindow) placeWindow(primaryWindow)
-  }
+  // A window appearing or closing changes what the poll would say.
+  onHasWindowChanged: refresh()
 }

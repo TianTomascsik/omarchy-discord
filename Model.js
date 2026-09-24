@@ -112,12 +112,54 @@ function moveDispatch(address, workspace, follow, usingLua) {
   return (follow ? "movetoworkspace " : "movetoworkspacesilent ") + selector + "," + target
 }
 
-// True when the toplevel already sits on the preset, so nothing has to move.
-function onWorkspace(toplevel, workspace) {
+// prop: hl.dsp.window.set_prop({ window = "address:0x1", prop = "focus_on_activate", value = "0" })  |  setprop address:0x1 focus_on_activate 0
+function propDispatch(address, prop, value, usingLua) {
+  var target = windowTarget(address)
+  if (target === "" || !prop) return ""
+  if (usingLua) {
+    return "hl.dsp.window.set_prop({ window = " + luaString(target) + ", prop = " + luaString(prop)
+      + ", value = " + luaString(value) + " })"
+  }
+  return "setprop " + target + " " + prop + " " + String(value)
+}
+
+// True when a window already sits on the preset, so nothing has to move.
+function sameWorkspace(label, workspace) {
   var selector = workspaceSelector(workspace)
-  var label = workspaceLabel(toplevel)
-  if (selector === "" || label === "") return false
-  return label === selector || "name:" + label === selector
+  var current = String(label || "")
+  if (selector === "" || current === "") return false
+  return current === selector || "name:" + current === selector
+}
+
+function onWorkspace(toplevel, workspace) {
+  return sameWorkspace(workspaceLabel(toplevel), workspace)
+}
+
+// openwindow data reads "55d28f0c6820,1,discord,Friends - Discord"; the title may carry commas, so it is the remainder.
+function parseOpenWindow(data) {
+  var parts = String(data || "").split(",")
+  if (parts.length < 3) return null
+  return { address: parts[0], workspace: parts[1], appClass: parts[2], title: parts.slice(3).join(",") }
+}
+
+// Measured: Discord opens a "Discord Updater" splash first, and the main window arrives while it is still up.
+var SPLASH_TITLES = ["Discord Updater"]
+
+function isSplash(title) {
+  return SPLASH_TITLES.indexOf(String(title || "").trim()) !== -1
+}
+
+// The Discord windows other than the one named and other than a splash, so a first real window is told apart from a second.
+function otherWindows(windows, address) {
+  var target = windowTarget(address)
+  var out = []
+  var list = windows || []
+  for (var i = 0; i < list.length; i++) {
+    var toplevel = list[i]
+    if (!toplevel || windowTarget(toplevel.address) === target || isSplash(toplevel.title)) continue
+    out.push(toplevel)
+  }
+  return out
 }
 
 var WORKSPACE_PRESET_MAX = 10

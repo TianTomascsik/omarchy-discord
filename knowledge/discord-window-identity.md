@@ -56,3 +56,15 @@ Discord in `app-graphical.slice` rather than in the compositor's slice.
 Hyprland raises the toplevel's `urgent` flag from xdg-activation, which Discord
 uses for a mention or a DM. It only works while a window exists, so an instance
 closed to the tray cannot report that it wants attention.
+
+# The updater splash comes first
+
+Measured on Omarchy 4.0.2 with discord app-1.0.158, 2026-09-24: a cold start
+publishes two `openwindow` events, both with class `discord`. The first is a
+splash titled `Discord Updater`; the second, the real window, first titled
+`Discord`, arrives while the splash is still open and only later takes the
+`... - Discord` title. Anything that keys "first window" off the count of
+Discord windows therefore has to leave the splash out, which is what
+`Model.isSplash` does. Whether vesktop shows a comparable splash was not
+measured.
+
