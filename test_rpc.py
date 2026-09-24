@@ -25,6 +25,16 @@ def check(name, passed, detail=""):
         FAILURES.append(name)
 
 
+class FakeSocket:
+    """Enough of a socket for Rpc(...) to be built and closed."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class FakeRpc:
     """Stands in for Rpc so the read loop can be driven without Discord."""
 
@@ -356,13 +366,29 @@ def a_missing_redirect_is_explained_in_the_refusal():
     check("other refusals get no hint", rpc.authorization_hint("declined") == "")
 
 
+def granting_friends_uses_its_own_connection():
+    """Measured live: AUTHORIZE on the bridge's authenticated socket answers "Already authenticated"."""
+    sockets = []
+    def fresh_socket():
+        sockets.append(FakeSocket())
+        return sockets[-1]
+    with stubbed(connect_socket=fresh_socket, handshake=lambda r, c: {},
+                 authorize=lambda r, cid, sec, scopes: {"access_token": "t2", "scope": " ".join(scopes)},
+                 save_token=lambda t: None):
+        token = rpc.grant_friends_scope("id", "secret")
+    check("the grant opens a connection of its own", len(sockets) == 1, sockets)
+    check("and closes it afterwards", sockets[0].closed)
+    check("and the token carries the scope", rpc.friends_scope_state(token)[0] == "granted", token)
+
+
 def granting_friends_records_a_refusal_with_its_reason():
     saved = []
     def refuse(*a):
         raise rpc.RpcRejected("Invalid scope")
-    with stubbed(authorize=refuse, load_token=lambda: {"access_token": "t", "scope": "rpc"},
+    with stubbed(connect_socket=lambda: FakeSocket(), handshake=lambda r, c: {}, authorize=refuse,
+                 load_token=lambda: {"access_token": "t", "scope": "rpc"},
                  save_token=lambda t: saved.append(t)):
-        token = rpc.grant_friends_scope(None, "id", "secret")
+        token = rpc.grant_friends_scope("id", "secret")
     scope, reason = rpc.friends_scope_state(token)
     check("a refused grant is remembered", scope == "refused" and token.get("friendsRefused") is True, token)
     check("with Discord's reason", reason == "Invalid scope", reason)
@@ -372,9 +398,11 @@ def granting_friends_records_a_refusal_with_its_reason():
 
 def granting_friends_detects_a_token_that_lacks_the_scope():
     saved = []
-    with stubbed(authorize=lambda *a: {"access_token": "t2", "scope": "rpc rpc.voice.read rpc.voice.write"},
+    with stubbed(connect_socket=lambda: FakeSocket(), handshake=lambda r, c: {},
+                 authorize=lambda *a: {"access_token": "t2", "scope": "rpc rpc.voice.read rpc.voice.write"},
+                 load_token=lambda: {"access_token": "t2", "scope": "rpc rpc.voice.read rpc.voice.write"},
                  save_token=lambda t: saved.append(t)):
-        token = rpc.grant_friends_scope(None, "id", "secret")
+        token = rpc.grant_friends_scope("id", "secret")
     scope, reason = rpc.friends_scope_state(token)
     check("a token without the scope reads as refused", scope == "refused", token)
     check("and names the scope", rpc.FRIENDS_SCOPE in reason, reason)
@@ -384,16 +412,21 @@ def granting_friends_detects_a_token_that_lacks_the_scope():
 
 
 def the_grant_command_reaches_the_bridge():
-    fake = FakeRpc()
-    fake.relationships = [{"type": 1, "user": {"id": "1", "username": "gm"}, "presence": {"status": "online"}}]
-    bridge = rpc.Bridge(fake, friends_enabled=False, client_id="id", client_secret="secret", friends_scope="missing")
-    with stubbed(authorize=lambda *a: {"access_token": "t2", "scope": "rpc " + rpc.FRIENDS_SCOPE},
-                 save_token=lambda t: None):
-        with contextlib.redirect_stdout(io.StringIO()) as out:
+    bridge = rpc.Bridge(FakeRpc(), friends_enabled=False, client_id="id", client_secret="secret", friends_scope="missing")
+    with stubbed(grant_friends_scope=lambda cid, sec: {"access_token": "t2", "scope": "rpc " + rpc.FRIENDS_SCOPE}):
+        try:
             bridge.handle_command('{"cmd":"grantFriends"}')
+            check("a granted scope restarts the session", False, "no restart")
+        except rpc.SessionRestart:
+            check("a granted scope restarts the session", True)
+    refused = rpc.Bridge(FakeRpc(), friends_enabled=False, client_id="id", client_secret="secret", friends_scope="missing")
+    with stubbed(grant_friends_scope=lambda cid, sec: {"access_token": "t", "scope": "rpc",
+                                                       "friendsRefused": True, "friendsRefusedReason": "Invalid scope"}):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            refused.handle_command('{"cmd":"grantFriends"}')
     state = json.loads(out.getvalue().splitlines()[-1])
-    check("a granted scope re-authenticates and lists friends",
-          state["friendsScope"] == "granted" and [f["id"] for f in state["friends"]] == ["1"], state)
+    check("a refused scope is reported in place",
+          state["friendsScope"] == "refused" and "Invalid scope" in state["friendsError"], state)
 
 
 def a_relationship_event_in_the_loop_emits_the_friend():
@@ -445,6 +478,7 @@ def main():
                  a_first_authorization_asks_for_voice_only_once,
                  a_refused_authorization_is_fatal_not_a_loop,
                  a_missing_redirect_is_explained_in_the_refusal,
+                 granting_friends_uses_its_own_connection,
                  granting_friends_records_a_refusal_with_its_reason,
                  granting_friends_detects_a_token_that_lacks_the_scope,
                  the_grant_command_reaches_the_bridge):

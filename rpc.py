@@ -71,6 +71,10 @@ class AuthorizationFailed(RpcError):
     """No token could be had; asking again without the user changing something only repeats the modal."""
 
 
+class SessionRestart(Exception):
+    """The saved token changed underneath a live socket, which Discord will not re-authenticate; reconnect at once."""
+
+
 def clip(text, limit):
     """Shorten for a log line, marking the cut so nobody reads it as the whole input."""
     text = str(text).strip()
@@ -337,20 +341,33 @@ def friends_scope_state(token):
     return "missing", ""
 
 
-def grant_friends_scope(rpc, client_id, client_secret):
-    """A second consent, on demand: the friend scope alone decides nothing about the voice tier."""
+def refuse_friends(reason):
+    token = load_token()
+    token["friendsRefused"] = True
+    token["friendsRefusedReason"] = str(reason)
+    save_token(token)
+    return token
+
+
+# Discord answers "Already authenticated" to AUTHORIZE on a socket that has done AUTHENTICATE, hence the own socket.
+def grant_friends_scope(client_id, client_secret):
+    """A second consent, on demand and on a fresh connection: the friend scope decides nothing about the voice tier."""
     try:
-        token = authorize(rpc, client_id, client_secret, SCOPES)
+        fresh = Rpc(connect_socket())
     except RpcError as error:
-        token = load_token()
-        token["friendsRefused"] = True
-        token["friendsRefusedReason"] = str(error)
-        save_token(token)
-        return token
+        return refuse_friends(error)
+    try:
+        handshake(fresh, client_id)
+        token = authorize(fresh, client_id, client_secret, SCOPES)
+    except RpcError as error:
+        return refuse_friends(error)
+    finally:
+        fresh.close()
     if not has_scope(token, FRIENDS_SCOPE):
-        token["friendsRefused"] = True
-        token["friendsRefusedReason"] = "Discord issued a token without %s" % FRIENDS_SCOPE
-        save_token(token)
+        return refuse_friends("Discord issued a token without %s" % FRIENDS_SCOPE)
+    token.pop("friendsRefused", None)
+    token.pop("friendsRefusedReason", None)
+    save_token(token)
     return token
 
 
@@ -530,15 +547,14 @@ class Bridge:
         else:
             warn("unknown command %r" % (name,))
 
-    # The panel's "Enable friend presence" row: one consent modal, then the list, or the reason it was refused.
+    # The panel's "Enable friend presence" row: one consent modal, then a reconnect with the wider token, or the reason.
     def grant_friends(self):
         if self.friends_enabled:
             return
-        token = grant_friends_scope(self.rpc, self.client_id, self.client_secret)
+        token = grant_friends_scope(self.client_id, self.client_secret)
         self.friends_scope, self.friends_reason = friends_scope_state(token)
         if self.friends_scope == "granted":
-            self.rpc.request("AUTHENTICATE", {"access_token": token["access_token"]})
-            self.friends_enabled = True
+            raise SessionRestart()
         self.load_friends()
         self.emit()
 
@@ -766,7 +782,7 @@ def setup():
         # --setup is also the terminal route to the friend scope, asked for separately so voice never depends on it.
         if not has_scope(token, FRIENDS_SCOPE):
             print("Asking Discord for %s next; approve or decline that prompt as you like." % FRIENDS_SCOPE)
-            token = grant_friends_scope(rpc, client_id, client_secret)
+            token = grant_friends_scope(client_id, client_secret)
         scope, reason = friends_scope_state(token)
         if scope == "granted":
             print("Friend presence is on: pick who to watch in the panel's Friends section.")
@@ -810,6 +826,8 @@ def main():
     while True:
         try:
             session()
+        except SessionRestart:
+            continue
         except AuthorizationFailed as error:
             # Looping here would raise Discord's consent modal every few seconds.
             emit_error(error, unauthorized=True)
