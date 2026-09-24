@@ -43,6 +43,18 @@ without a file event. While the file is trusted it replaces the bridge's
 friend list and hides the consent row; the bridge remains the source for an
 application Discord has approved.
 
+# What BetterDiscord's require actually offers
+
+Measured on BetterDiscord 1.12.7, and confirmed in its source: a plugin's
+`require` resolves `request`, `https`, `original-fs`, `fs`, `path`, `events`,
+`electron`, `process`, `vm`, `module`, `buffer` and `crypto`, and nothing
+else. `require("os")` throws at load and the plugin never starts, with no
+file to show for it. `fs` is a polyfill over the preload's filesystem API,
+but `mkdirSync`, `writeFileSync` and `renameSync` pass their arguments
+straight to Node, so `{ recursive, mode }` and the temporary-then-rename
+write work as they would in Node. Home is derived from `BdApi.Plugins.folder`,
+three levels down from it, when `process.env.HOME` is not there to read.
+
 # Not yet measured
 
 The plugin has run only against stubbed stores. BetterDiscord was not injected

@@ -7,14 +7,19 @@
  * @website https://github.com/TianTomascsik/omarchy-discord
  */
 
-// The widget reads this file; the path mirrors what the bar side derives from the same variables.
+// BetterDiscord hands plugins a small require: fs and path are in it, os is not, so home comes from the plugins folder.
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 
-const STATE_DIR = path.join(
-  (typeof process !== "undefined" && process.env.XDG_STATE_HOME) || path.join(os.homedir(), ".local", "state"),
-  "omarchy-discord");
+function stateDir() {
+  const env = (typeof process !== "undefined" && process.env) || {};
+  if (env.XDG_STATE_HOME) return path.join(env.XDG_STATE_HOME, "omarchy-discord");
+  // ~/.config/BetterDiscord/plugins, three levels under home on every BetterDiscord install.
+  const home = env.HOME || path.resolve(BdApi.Plugins.folder, "..", "..", "..");
+  return path.join(home, ".local", "state", "omarchy-discord");
+}
+
+const STATE_DIR = stateDir();
 const STATE_FILE = path.join(STATE_DIR, "friends.json");
 const SCHEMA = 1;
 // Presence changes arrive in bursts, so one write per burst.
@@ -28,7 +33,10 @@ const DIR_MODE = 0o700;
 module.exports = class OmarchyDiscord {
   start() {
     this.stores = this.findStores();
-    if (!this.stores) return;
+    if (!this.stores) {
+      this.writeRaw({ schema: SCHEMA, active: true, updatedAt: Date.now(), friends: [], error: "Discord store not found" });
+      return;
+    }
     this.listener = () => this.schedule();
     this.stores.presence.addChangeListener(this.listener);
     this.stores.relationships.addChangeListener(this.listener);
@@ -90,16 +98,21 @@ module.exports = class OmarchyDiscord {
       friends = active ? this.snapshot() : [];
     } catch (error) {
       BdApi.Logger.error("OmarchyDiscord", "Could not read the friend list", error);
+      // The widget shows this line, which beats a console nobody opens.
+      this.writeRaw({ schema: SCHEMA, active: active, updatedAt: Date.now(), friends: [], error: String(error && error.message || error) });
       return;
     }
     const payload = JSON.stringify(friends);
     if (!force && this.lastPayload === payload) return;
     this.lastPayload = payload;
-    const body = JSON.stringify({ schema: SCHEMA, active: active, updatedAt: Date.now(), friends: friends });
+    this.writeRaw({ schema: SCHEMA, active: active, updatedAt: Date.now(), friends: friends });
+  }
+
+  writeRaw(document) {
     try {
       fs.mkdirSync(STATE_DIR, { recursive: true, mode: DIR_MODE });
       const temporary = STATE_FILE + ".tmp";
-      fs.writeFileSync(temporary, body, { mode: FILE_MODE });
+      fs.writeFileSync(temporary, JSON.stringify(document), { mode: FILE_MODE });
       fs.renameSync(temporary, STATE_FILE);
     } catch (error) {
       BdApi.Logger.error("OmarchyDiscord", "Could not write " + STATE_FILE, error);
