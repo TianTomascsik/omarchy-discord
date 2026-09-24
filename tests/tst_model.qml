@@ -113,6 +113,16 @@ TestCase {
   function test_focusDispatch_speaks_lua_only_when_hyprland_does() {
     compare(Model.focusDispatch("0x1", false), "focuswindow address:0x1")
     compare(Model.focusDispatch("0x1", true), 'hl.dsp.focus({ window = "address:0x1" })')
+    compare(Model.focusDispatch("", true), "")
+  }
+
+  // Measured: Quickshell 0.3.1 hands over "55d28f0c6820" and Hyprland 0.56 only resolves "0x55d28f0c6820".
+  function test_windowTarget_restores_the_0x_quickshell_drops() {
+    compare(Model.windowTarget("55d28f0c6820"), "address:0x55d28f0c6820")
+    compare(Model.windowTarget("0x55d28f0c6820"), "address:0x55d28f0c6820")
+    compare(Model.windowTarget(" 0X1 "), "address:0X1")
+    compare(Model.windowTarget(""), "")
+    compare(Model.moveDispatch("55d28f0c6820", "3", false, false), "movetoworkspacesilent 3,address:0x55d28f0c6820")
   }
 
   function test_moveDispatch_carries_the_follow_flag_in_both_syntaxes() {

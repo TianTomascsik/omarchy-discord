@@ -171,19 +171,25 @@ Item {
   }
 
   // A Lua-configured Hyprland rejects the legacy dispatcher strings, so the form follows usingLua.
+  function dispatch(command) {
+    if (command === "") return
+    // Hyprland's reply never reaches QML, so the command itself is the only trace in the shell log.
+    console.log("omarchy-discord dispatch: " + command)
+    Hyprland.dispatch(command)
+  }
+
   function focusWindow(toplevel) {
     var target = toplevel || primaryWindow
     if (!target || !target.address) return
     // Focusing follows the window to its workspace.
-    Hyprland.dispatch(Model.focusDispatch(target.address, Hyprland.usingLua))
+    dispatch(Model.focusDispatch(target.address, Hyprland.usingLua))
   }
 
   // Runs once when Discord's first window appears, whichever launcher opened it.
   function placeWindow(toplevel) {
     if (workspacePreset === "" || !toplevel || !toplevel.address) return
     if (Model.onWorkspace(toplevel, workspacePreset)) return
-    var command = Model.moveDispatch(toplevel.address, workspacePreset, followWorkspace, Hyprland.usingLua)
-    if (command !== "") Hyprland.dispatch(command)
+    dispatch(Model.moveDispatch(toplevel.address, workspacePreset, followWorkspace, Hyprland.usingLua))
   }
 
   // Electron hands a re-launch to the running process, which unhides a tray-hidden instance.

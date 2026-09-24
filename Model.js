@@ -85,9 +85,17 @@ function workspaceSelector(value) {
   return "name:" + text
 }
 
+// Quickshell reports a toplevel address as bare hex, and Hyprland's address: selector only matches with the 0x.
+function windowTarget(address) {
+  var hex = String(address || "").trim()
+  if (hex === "") return ""
+  return "address:" + (/^0x/i.test(hex) ? hex : "0x" + hex)
+}
+
 // focus: hl.dsp.focus({ window = "address:0x1" })  |  focuswindow address:0x1
 function focusDispatch(address, usingLua) {
-  var target = "address:" + String(address || "")
+  var target = windowTarget(address)
+  if (target === "") return ""
   if (usingLua) return "hl.dsp.focus({ window = " + luaString(target) + " })"
   return "focuswindow " + target
 }
@@ -95,8 +103,8 @@ function focusDispatch(address, usingLua) {
 // move: hl.dsp.window.move({ workspace = "5", window = "address:0x1", follow = false })  |  movetoworkspacesilent 5,address:0x1
 function moveDispatch(address, workspace, follow, usingLua) {
   var selector = workspaceSelector(workspace)
-  if (selector === "" || !address) return ""
-  var target = "address:" + String(address)
+  var target = windowTarget(address)
+  if (selector === "" || target === "") return ""
   if (usingLua) {
     return "hl.dsp.window.move({ workspace = " + luaString(selector) + ", window = " + luaString(target)
       + ", follow = " + (follow ? "true" : "false") + " })"
