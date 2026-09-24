@@ -633,7 +633,7 @@ function channelSub(guild, count, joined, joining, error) {
   if (joining) return "Joining..."
   if (error) return String(error)
   var where = String(guild || "")
-  var state = joined ? "connected" : (count > 0 ? count + " in call" : (count === 0 ? "empty" : ""))
+  var state = joined ? "connected · press to leave" : (count > 0 ? count + " in call" : (count === 0 ? "empty" : ""))
   if (where === "") return state
   return state === "" ? where : where + " · " + state
 }

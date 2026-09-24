@@ -235,6 +235,15 @@ Item {
     return "ok"
   }
 
+  // The row is a toggle: pressing the channel you sit in leaves it; the join verb stays join-only.
+  function toggleChannel(id) {
+    if (String(id || "") !== "" && String(id) === callChannelId) {
+      hangUp()
+      return "ok"
+    }
+    return joinChannel(id)
+  }
+
   function sendJoin() {
     if (pendingJoin === "") return
     joinAttempts += 1

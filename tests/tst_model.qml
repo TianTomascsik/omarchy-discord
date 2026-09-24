@@ -382,7 +382,7 @@ TestCase {
   function test_channelSub_covers_every_branch() {
     compare(Model.channelSub("Srv", 3, false, true, ""), "Joining...")
     compare(Model.channelSub("Srv", 3, false, false, "No permission to join"), "No permission to join")
-    compare(Model.channelSub("Srv", 3, true, false, ""), "Srv · connected")
+    compare(Model.channelSub("Srv", 3, true, false, ""), "Srv · connected · press to leave")
     compare(Model.channelSub("Srv", 3, false, false, ""), "Srv · 3 in call")
     compare(Model.channelSub("Srv", 0, false, false, ""), "Srv · empty")
     compare(Model.channelSub("Srv", -1, false, false, ""), "Srv")

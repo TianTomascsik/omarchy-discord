@@ -186,8 +186,8 @@ omarchy bar set io.github.thisisgm.discord workspace '""' --json   # back to "an
 
 With the optional RPC tier below set up, the panel gains a **Channels**
 section. **Add a channel** searches every voice channel of every server you
-are in, and each pick becomes a row: press it and you are in that call. If
-you are already in a call, Discord moves you. If Discord is not running, the
+are in, and each pick becomes a row: press it and you are in that call, press
+it again and you leave. If you are in a different call, Discord moves you. If Discord is not running, the
 same press starts it, lands it on your workspace preset, waits for its voice
 engine and then joins; the hero reads "Starting Discord to join #general"
 meanwhile, and gives up with a reason after a minute. Each row shows the

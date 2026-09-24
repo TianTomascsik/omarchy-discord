@@ -267,7 +267,7 @@ Panel {
     case "open": if (discord.installed) { discord.open(); root.close() } break
     case "setup": root.openSetup(); break
     case "reauth": discord.rpc.reauthorize(); break
-    case "channel": discord.joinChannel(discord.favouriteRows[currentRow.key].id); break
+    case "channel": discord.toggleChannel(discord.favouriteRows[currentRow.key].id); break
     case "addChannel": if (root.channelControl) root.channelControl.open(); break
     case "workspace": root.persist("workspace", Model.nextOption(root.workspaceOptions, root.workspacePreset)); break
     case "follow": root.persist("followWorkspace", !root.followWorkspace); break
@@ -1769,7 +1769,7 @@ Panel {
     }
   }
 
-  // A favourite voice channel: one press joins it, starting Discord first when it has to.
+  // A favourite voice channel: one press joins it, starting Discord first when it has to; a press while in it leaves.
   component ChannelRow: CursorSurface {
     id: channelRow
     property var row: null
@@ -1787,7 +1787,7 @@ Panel {
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
       onEntered: root.setCursor(channelRow.navIndex)
-      onClicked: if (channelRow.row) discord.joinChannel(channelRow.row.id)
+      onClicked: if (channelRow.row) discord.toggleChannel(channelRow.row.id)
     }
 
     RowLayout {
