@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.thisisgm.discord",
   "name": "Discord",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "author": "GM",
   "license": "MIT",
-  "description": "Discord in the Omarchy bar: attention badge, call state, volume, window focus, and memory footprint.",
+  "description": "Discord in the Omarchy bar: attention badge, call state, volume, window focus, memory footprint, a workspace preset and friend online notifications.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,12 +14,15 @@
   },
   "barWidget": {
     "displayName": "Discord",
-    "description": "Raise or launch Discord, see and control the voice call, and watch what it costs in memory.",
+    "description": "Raise or launch Discord on a chosen workspace, see and control the voice call, watch what it costs in memory, and get told when a watched friend comes online.",
     "category": "Social",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "hideWhenStopped": false
+      "hideWhenStopped": false,
+      "workspace": "",
+      "followWorkspace": false,
+      "watchedFriends": []
     },
     "schema": [
       {
@@ -27,7 +30,26 @@
         "type": "boolean",
         "label": "Hide the icon when Discord is not running",
         "defaultValue": false
+      },
+      {
+        "key": "workspace",
+        "type": "string",
+        "label": "Workspace Discord opens on (empty leaves it alone)",
+        "defaultValue": ""
+      },
+      {
+        "key": "followWorkspace",
+        "type": "boolean",
+        "label": "Switch to that workspace when Discord opens",
+        "defaultValue": false
+      },
+      {
+        "key": "watchedFriends",
+        "type": "array",
+        "label": "Friends to notify about when they come online",
+        "defaultValue": []
       }
     ]
-  }
+  },
+  "homepage": "https://github.com/TianTomascsik/omarchy-discord"
 }

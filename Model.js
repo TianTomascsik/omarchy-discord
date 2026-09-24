@@ -70,6 +70,81 @@ function workspaceLabel(toplevel) {
   return workspace.id === undefined ? "" : String(workspace.id)
 }
 
+// ---------------------------------------------------------------- hyprland
+
+// A Lua-configured Hyprland wraps every IPC dispatch in hl.dispatch(...), so the legacy strings are a syntax error there.
+function luaString(value) {
+  return JSON.stringify(String(value || ""))
+}
+
+// "5" and "name:chat" are the same selector in both syntaxes; a bare word is a name.
+function workspaceSelector(value) {
+  var text = String(value || "").trim()
+  if (text === "") return ""
+  if (/^[0-9]+$/.test(text) || /^(name|special|empty|prev|previous|e[+-]|r[+-]|[+-])/.test(text)) return text
+  return "name:" + text
+}
+
+// focus: hl.dsp.focus({ window = "address:0x1" })  |  focuswindow address:0x1
+function focusDispatch(address, usingLua) {
+  var target = "address:" + String(address || "")
+  if (usingLua) return "hl.dsp.focus({ window = " + luaString(target) + " })"
+  return "focuswindow " + target
+}
+
+// move: hl.dsp.window.move({ workspace = "5", window = "address:0x1", follow = false })  |  movetoworkspacesilent 5,address:0x1
+function moveDispatch(address, workspace, follow, usingLua) {
+  var selector = workspaceSelector(workspace)
+  if (selector === "" || !address) return ""
+  var target = "address:" + String(address)
+  if (usingLua) {
+    return "hl.dsp.window.move({ workspace = " + luaString(selector) + ", window = " + luaString(target)
+      + ", follow = " + (follow ? "true" : "false") + " })"
+  }
+  return (follow ? "movetoworkspace " : "movetoworkspacesilent ") + selector + "," + target
+}
+
+// True when the toplevel already sits on the preset, so nothing has to move.
+function onWorkspace(toplevel, workspace) {
+  var selector = workspaceSelector(workspace)
+  var label = workspaceLabel(toplevel)
+  if (selector === "" || label === "") return false
+  return label === selector || "name:" + label === selector
+}
+
+var WORKSPACE_PRESET_MAX = 10
+var WORKSPACE_ANY = ""
+
+// The dropdown lists "Any", the ten bound workspaces, then any named ones Hyprland knows about.
+function workspaceOptions(workspaces) {
+  var options = [{ value: WORKSPACE_ANY, label: "Any workspace" }]
+  var seen = {}
+  for (var n = 1; n <= WORKSPACE_PRESET_MAX; n++) {
+    options.push({ value: String(n), label: "Workspace " + n })
+    seen[String(n)] = true
+  }
+  var list = workspaces || []
+  for (var i = 0; i < list.length; i++) {
+    var ws = list[i]
+    if (!ws) continue
+    var name = String(ws.name || "")
+    if (name === "" || seen[name] || /^[0-9]+$/.test(name) || name.indexOf("special") === 0) continue
+    seen[name] = true
+    options.push({ value: name, label: name })
+  }
+  return options
+}
+
+// Enter on the workspace row steps to the next option, wrapping, so the row works without a mouse.
+function nextOption(options, value) {
+  var list = options || []
+  if (list.length === 0) return ""
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i].value) === String(value)) return String(list[(i + 1) % list.length].value)
+  }
+  return String(list[0].value)
+}
+
 // ---------------------------------------------------------------- pipewire
 
 // PwNode.properties is only valid once a PwObjectTracker has bound the node.
@@ -190,6 +265,126 @@ function pingGlyph(quality) {
   if (quality === "fair") return "󰤢"
   if (quality === "poor") return "󰤟"
   return "󰤯"
+}
+
+// ---------------------------------------------------------------- friends
+
+// Discord's reachable presences; everything else, including invisible, reads as offline.
+var REACHABLE_STATUSES = ["online", "idle", "dnd"]
+
+function isOnline(status) {
+  return REACHABLE_STATUSES.indexOf(String(status || "")) !== -1
+}
+
+function presenceLabel(status) {
+  var text = String(status || "")
+  if (text === "online") return "Online"
+  if (text === "idle") return "Idle"
+  if (text === "dnd") return "Do not disturb"
+  if (text === "offline") return "Offline"
+  return "Unknown"
+}
+
+// { "80351110224678912": "online", ... } from the bridge's friend list.
+function presenceMap(friends) {
+  var map = {}
+  var list = friends || []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].id !== undefined) map[String(list[i].id)] = String(list[i].status || "offline")
+  }
+  return map
+}
+
+// Watched entries carry a stored name so the row reads before the bridge is up; live data wins when present.
+function watchedRows(friends, watched) {
+  var byId = {}
+  var list = friends || []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].id !== undefined) byId[String(list[i].id)] = list[i]
+  }
+  var out = []
+  var wanted = watched || []
+  for (var w = 0; w < wanted.length; w++) {
+    var entry = wanted[w]
+    if (!entry || entry.id === undefined) continue
+    var id = String(entry.id)
+    var live = byId[id]
+    out.push({
+      id: id,
+      name: live ? String(live.name) : String(entry.name || id),
+      status: live ? String(live.status || "offline") : "unknown"
+    })
+  }
+  return out
+}
+
+// Dropdown options for the friends not yet watched, names first so the search reads naturally.
+function watchableFriends(friends, watched) {
+  var taken = {}
+  var wanted = watched || []
+  for (var w = 0; w < wanted.length; w++) {
+    if (wanted[w] && wanted[w].id !== undefined) taken[String(wanted[w].id)] = true
+  }
+  var out = []
+  var list = friends || []
+  for (var i = 0; i < list.length; i++) {
+    var friend = list[i]
+    if (!friend || friend.id === undefined || taken[String(friend.id)]) continue
+    out.push({ value: String(friend.id), label: String(friend.name || friend.id), description: presenceLabel(friend.status) })
+  }
+  out.sort(function (a, b) { return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : (a.label.toLowerCase() > b.label.toLowerCase() ? 1 : 0) })
+  return out
+}
+
+// Watched friends that were unreachable in the last snapshot and reachable now; an unseen friend is never an arrival.
+function arrivals(previous, friends, watched) {
+  var before = previous || {}
+  var now = presenceMap(friends)
+  var names = {}
+  var list = friends || []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].id !== undefined) names[String(list[i].id)] = String(list[i].name || list[i].id)
+  }
+  var out = []
+  var wanted = watched || []
+  for (var w = 0; w < wanted.length; w++) {
+    var entry = wanted[w]
+    if (!entry || entry.id === undefined) continue
+    var id = String(entry.id)
+    if (before[id] === undefined || isOnline(before[id]) || !isOnline(now[id])) continue
+    out.push({ id: id, name: names[id] || String(entry.name || id), status: now[id] })
+  }
+  return out
+}
+
+function countOnline(rows) {
+  var list = rows || []
+  var count = 0
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && isOnline(list[i].status)) count++
+  }
+  return count
+}
+
+function addWatched(watched, id, name) {
+  var list = (watched || []).slice()
+  var key = String(id || "")
+  if (key === "") return list
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && String(list[i].id) === key) return list
+  }
+  list.push({ id: key, name: String(name || key) })
+  return list
+}
+
+function removeWatched(watched, id) {
+  var key = String(id || "")
+  var out = []
+  var list = watched || []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && String(list[i].id) !== key) out.push(list[i])
+  }
+  return out
 }
 
 // ---------------------------------------------------------------- format

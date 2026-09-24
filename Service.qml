@@ -15,6 +15,14 @@ Item {
   readonly property int settleTicks: 4
   readonly property real maxVolume: 1.5
 
+  // ------------------------------------------------------------ settings
+
+  // Panel hands these down from shell.json; "" leaves Discord wherever Hyprland puts it.
+  property string workspacePreset: ""
+  property bool followWorkspace: false
+  // Entries look like { id: "80351110224678912", name: "gm" }.
+  property var watchedFriends: []
+
   // ------------------------------------------------------------ installed
 
   readonly property var applications: DesktopEntries.applications ? DesktopEntries.applications.values : []
@@ -33,6 +41,7 @@ Item {
   // ------------------------------------------------------------ windows
 
   readonly property var toplevels: Hyprland.toplevels ? Hyprland.toplevels.values : []
+  readonly property var workspaces: Hyprland.workspaces ? Hyprland.workspaces.values : []
   readonly property var windows: Model.matchWindows(toplevels)
   readonly property bool hasWindow: windows.length > 0
   readonly property var primaryWindow: hasWindow ? windows[0] : null
@@ -86,6 +95,57 @@ Item {
     objects: root.streamNodes
   }
 
+  // ------------------------------------------------------------ friends
+
+  // The bridge's friend list, only with the relationships.read scope granted.
+  readonly property var friends: bridge.friends
+  readonly property bool friendsKnown: bridge.friendsOk
+  readonly property string friendsError: bridge.friendsError
+  readonly property var watchedRows: Model.watchedRows(friends, watchedFriends)
+  readonly property var watchableFriends: Model.watchableFriends(friends, watchedFriends)
+  readonly property int watchedOnline: Model.countOnline(watchedRows)
+
+  // The first snapshot after a connect only seeds, so nobody gets a storm of stale arrivals.
+  property var lastPresence: ({})
+  property bool presenceSeeded: false
+  property var lastNotifiedAt: ({})
+  readonly property int notifyCooldownMs: 60000
+
+  Connections {
+    target: bridge
+    function onFriendsChanged() { root.trackPresence() }
+    function onReadyChanged() {
+      if (bridge.ready) return
+      root.presenceSeeded = false
+      root.lastPresence = {}
+    }
+  }
+
+  function trackPresence() {
+    if (!bridge.friendsOk) return
+    if (!presenceSeeded) {
+      lastPresence = Model.presenceMap(bridge.friends)
+      presenceSeeded = true
+      return
+    }
+    var arrivals = Model.arrivals(lastPresence, bridge.friends, watchedFriends)
+    lastPresence = Model.presenceMap(bridge.friends)
+    var now = Date.now()
+    for (var i = 0; i < arrivals.length; i++) {
+      var friend = arrivals[i]
+      if (now - (lastNotifiedAt[friend.id] || 0) < notifyCooldownMs) continue
+      lastNotifiedAt[friend.id] = now
+      notifyOnline(friend)
+    }
+  }
+
+  // The shell's own notification server; clicking the toast raises Discord.
+  function notifyOnline(friend) {
+    Util.execArgv(["omarchy-notification-send", "--app-name", "Discord", "-g", "󰂚", "-u", "normal",
+      String(friend.name) + " is online", Model.presenceLabel(friend.status) + " on Discord",
+      "--exec", "omarchy-shell", "discord", "raise"])
+  }
+
   // ------------------------------------------------------------ actions
 
   // Re-reads both tiers in case a dispatch was missed; the bridge ignores this while down.
@@ -106,15 +166,24 @@ Item {
   function launch() {
     if (!installed) return
     // StartupWMClass is not the desktop file's basename, which is why the key exists at all.
-    Util.execDetached("uwsm-app -- gtk-launch " + String(Model.findEntry(applications, lastClientId).id))
+    Util.execArgv(["uwsm-app", "--", "gtk-launch", String(Model.findEntry(applications, lastClientId).id)])
     settle()
   }
 
+  // A Lua-configured Hyprland rejects the legacy dispatcher strings, so the form follows usingLua.
   function focusWindow(toplevel) {
     var target = toplevel || primaryWindow
     if (!target || !target.address) return
-    // focuswindow follows the window to its workspace.
-    Hyprland.dispatch("focuswindow address:" + target.address)
+    // Focusing follows the window to its workspace.
+    Hyprland.dispatch(Model.focusDispatch(target.address, Hyprland.usingLua))
+  }
+
+  // Runs once when Discord's first window appears, whichever launcher opened it.
+  function placeWindow(toplevel) {
+    if (workspacePreset === "" || !toplevel || !toplevel.address) return
+    if (Model.onWorkspace(toplevel, workspacePreset)) return
+    var command = Model.moveDispatch(toplevel.address, workspacePreset, followWorkspace, Hyprland.usingLua)
+    if (command !== "") Hyprland.dispatch(command)
   }
 
   // Electron hands a re-launch to the running process, which unhides a tray-hidden instance.
@@ -130,7 +199,7 @@ Item {
       lastError = "Could not find the main Discord process to quit"
       return
     }
-    Util.execDetached("kill " + mainPid)
+    Util.execArgv(["kill", String(mainPid)])
     settle()
   }
 
@@ -216,6 +285,9 @@ Item {
     }
   }
 
-  // A window appearing or closing changes what the poll would say.
-  onHasWindowChanged: refresh()
+  // A window appearing or closing changes what the poll would say; a first window also takes the preset.
+  onHasWindowChanged: {
+    refresh()
+    if (hasWindow) placeWindow(primaryWindow)
+  }
 }

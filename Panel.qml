@@ -20,6 +20,26 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property bool hideWhenStopped: setting("hideWhenStopped", false) === true
+  // "" leaves Discord wherever Hyprland puts it; anything else is a workspace id or name.
+  readonly property string workspacePreset: String(setting("workspace", ""))
+  readonly property bool followWorkspace: setting("followWorkspace", false) === true
+  readonly property var watchedFriends: settings && settings.watchedFriends instanceof Array ? settings.watchedFriends : []
+  readonly property var workspaceOptions: Model.workspaceOptions(discord.workspaces)
+  readonly property int presetDropdownWidth: Style.space(150)
+
+  // The friends section earns its place once the bridge exists or someone is watched.
+  readonly property bool friendsVisible: discord.running
+    && (setupVisible || discord.rpc.connected || watchedFriends.length > 0 || discord.friendsError !== "")
+  readonly property string friendsHint: {
+    if (!discord.running) return ""
+    if (!discord.rpc.configured) return "Set up voice controls above and friend notifications come with them."
+    if (discord.friendsError !== "") return discord.friendsError
+    if (!discord.rpc.connected) return "Waiting for the voice bridge."
+    if (discord.friendsKnown && discord.watchedRows.length === 0) return "Pick a friend to be told when they come online."
+    return ""
+  }
+  // The searchable dropdown lives inside an inline component, so the cursor reaches it through this handle.
+  property var watchControl: null
   readonly property real volumeStep: 0.05
   // Discord's own input volume is a 0-100 percentage, not a PipeWire ratio.
   readonly property int gainStep: 5
@@ -44,6 +64,36 @@ Panel {
   function submitSetup() {
     setupError = ""
     if (!saveProcess.running) saveProcess.running = true
+  }
+
+  // Tailscale's pattern: rewrite this widget's shell.json entry and let the bar hand the settings back.
+  function persist(key, value) {
+    if (!root.bar || !root.bar.shell || typeof root.bar.shell.updateEntryInline !== "function") return
+    var entry = { id: root.moduleName }
+    for (var k in settings) if (k !== "id") entry[k] = settings[k]
+    entry[key] = value
+    root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function watchFriend(id) {
+    var name = String(id || "")
+    if (name === "") return
+    for (var i = 0; i < discord.friends.length; i++) {
+      if (String(discord.friends[i].id) === name) name = String(discord.friends[i].name)
+    }
+    persist("watchedFriends", Model.addWatched(root.watchedFriends, id, name))
+  }
+
+  function unwatchFriend(id) {
+    persist("watchedFriends", Model.removeWatched(root.watchedFriends, id))
+  }
+
+  // No green in the palette, so reachable is foreground, busy is urgent, gone is faint.
+  function presenceColor(status) {
+    if (status === "dnd") return root.urgent
+    if (status === "online") return root.foreground
+    if (status === "idle") return root.dim
+    return Util.alpha(root.foreground, 0.2)
   }
 
   // The form's fields are not cursor stops, so opening it has to hand focus over.
@@ -88,19 +138,25 @@ Panel {
     if (callControls) list.push({ kind: "gain" })
     if (discord.hasPlayback) list.push({ kind: "volume" })
     if (setupVisible && !setupOpen) list.push({ kind: "setup" })
-    for (var i = 0; i < discord.windows.length; i++) list.push({ kind: "window", windowIndex: i })
+    for (var i = 0; i < discord.windows.length; i++) list.push({ kind: "window", itemIndex: i })
     // The window rows already focus Discord, so this row is only for when there is none.
     if (!discord.hasWindow) list.push({ kind: "open" })
+    list.push({ kind: "workspace" })
+    if (root.workspacePreset !== "") list.push({ kind: "follow" })
+    if (root.friendsVisible) {
+      for (var f = 0; f < discord.watchedRows.length; f++) list.push({ kind: "friend", itemIndex: f })
+      if (discord.watchableFriends.length > 0) list.push({ kind: "watch" })
+    }
     return list
   }
 
   readonly property var currentRow: rowIndex >= 0 && rowIndex < navRows.length ? navRows[rowIndex] : null
 
-  function indexOfRow(kind, windowIndex) {
+  function indexOfRow(kind, itemIndex) {
     for (var i = 0; i < navRows.length; i++) {
       var row = navRows[i]
       if (row.kind !== kind) continue
-      if (kind === "window" && row.windowIndex !== windowIndex) continue
+      if ((kind === "window" || kind === "friend") && row.itemIndex !== itemIndex) continue
       return i
     }
     return -1
@@ -134,9 +190,13 @@ Panel {
     case "deafen": discord.toggleDeaf(); break
     case "hangup": discord.hangUp(); break
     case "volume": discord.toggleAppMute(); break
-    case "window": discord.focusWindow(discord.windows[currentRow.windowIndex]); root.close(); break
+    case "window": discord.focusWindow(discord.windows[currentRow.itemIndex]); root.close(); break
     case "open": if (discord.installed) { discord.open(); root.close() } break
     case "setup": root.openSetup(); break
+    case "workspace": root.persist("workspace", Model.nextOption(root.workspaceOptions, root.workspacePreset)); break
+    case "follow": root.persist("followWorkspace", !root.followWorkspace); break
+    case "friend": root.unwatchFriend(discord.watchedRows[currentRow.itemIndex].id); break
+    case "watch": if (root.watchControl) root.watchControl.open(); break
     }
   }
 
@@ -157,6 +217,9 @@ Panel {
 
   Service {
     id: discord
+    workspacePreset: root.workspacePreset
+    followWorkspace: root.followWorkspace
+    watchedFriends: root.watchedFriends
   }
 
   // Shows audio actually reaching the call, not just that the mic is unmuted.
@@ -460,7 +523,7 @@ Panel {
                 kind: "setup"
                 glyph: "󰒓"
                 label: "Set up voice controls"
-                sub: "Channel name, deafen and hang up"
+                sub: "Channel name, deafen, hang up and friend notifications"
                 onTriggered: root.openSetup()
               }
 
@@ -585,6 +648,88 @@ Panel {
                 label: discord.running ? "Show Discord" : "Start Discord"
                 actionEnabled: discord.installed
                 onTriggered: { discord.open(); root.close() }
+              }
+            }
+          }
+
+          PanelSeparator {
+            foreground: root.foreground
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(10)
+
+            PanelSectionHeader {
+              text: "WORKSPACE"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.space(6)
+
+              WorkspaceRow {
+                width: parent.width
+              }
+
+              FollowRow {
+                visible: root.workspacePreset !== ""
+                width: parent.width
+              }
+            }
+          }
+
+          PanelSeparator {
+            visible: root.friendsVisible
+            foreground: root.foreground
+          }
+
+          Column {
+            visible: root.friendsVisible
+            width: parent.width
+            spacing: Style.space(10)
+
+            PanelSectionHeader {
+              text: "FRIENDS"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Column {
+              id: friendColumn
+              width: parent.width
+              spacing: Style.space(6)
+
+              Repeater {
+                model: discord.watchedRows
+
+                FriendRow {
+                  required property var modelData
+                  required property int index
+                  width: friendColumn.width
+                  friend: modelData
+                  itemIndex: index
+                }
+              }
+
+              WatchRow {
+                visible: discord.watchableFriends.length > 0
+                width: parent.width
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                visible: root.friendsHint !== ""
+                width: parent.width
+                leftPadding: Style.space(10)
+                rightPadding: Style.space(10)
+                text: root.friendsHint
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
               }
             }
           }
@@ -1094,6 +1239,212 @@ Panel {
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
         }
+      }
+    }
+  }
+
+  // The preset: a dropdown of Hyprland's workspaces, and Enter steps through it for the keyboard.
+  component WorkspaceRow: CursorSurface {
+    id: workspaceRow
+    readonly property int navIndex: root.indexOfRow("workspace", -1)
+
+    hasCursor: root.cursorActive && root.rowIndex === navIndex
+    foreground: root.foreground
+    implicitHeight: workspaceContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      acceptedButtons: Qt.NoButton
+      onEntered: root.setCursor(workspaceRow.navIndex)
+    }
+
+    RowLayout {
+      id: workspaceContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+      spacing: Style.space(8)
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: "Open Discord on"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: root.workspacePreset === "" ? "Wherever Hyprland puts it"
+            : (root.followWorkspace ? "And switch to it" : "Without switching to it")
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      Dropdown {
+        width: root.presetDropdownWidth
+        showLabel: false
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        options: root.workspaceOptions
+        value: root.workspacePreset
+        hasCursor: workspaceRow.hasCursor
+        onChanged: function (value) { root.persist("workspace", value) }
+        onHovered: function (on) { if (on) root.setCursor(workspaceRow.navIndex) }
+        Layout.alignment: Qt.AlignVCenter
+      }
+    }
+  }
+
+  component FollowRow: Toggle {
+    id: followRow
+    readonly property int navIndex: root.indexOfRow("follow", -1)
+
+    label: "Switch to it"
+    description: "Off moves Discord there without leaving your workspace"
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    checked: root.followWorkspace
+    hasCursor: root.cursorActive && root.rowIndex === navIndex
+    onClicked: root.persist("followWorkspace", !root.followWorkspace)
+    onHovered: function (on) { if (on) root.setCursor(followRow.navIndex) }
+  }
+
+  // A watched friend: presence dot, name and status; the switch stops watching.
+  component FriendRow: CursorSurface {
+    id: friendRow
+    property var friend: null
+    property int itemIndex: 0
+    readonly property int navIndex: root.indexOfRow("friend", itemIndex)
+    readonly property string status: friend ? String(friend.status || "unknown") : "unknown"
+
+    hasCursor: root.cursorActive && root.rowIndex === navIndex
+    foreground: root.foreground
+    implicitHeight: friendContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      acceptedButtons: Qt.NoButton
+      onEntered: root.setCursor(friendRow.navIndex)
+    }
+
+    RowLayout {
+      id: friendContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+      spacing: Style.space(8)
+
+      Rectangle {
+        width: Style.space(8)
+        height: width
+        radius: width / 2
+        color: root.presenceColor(friendRow.status)
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: friendRow.friend ? String(friendRow.friend.name) : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: friendRow.status === "unknown" ? "Unknown, bridge offline" : Model.presenceLabel(friendRow.status)
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      ToggleSwitch {
+        id: unwatchSwitch
+        checked: true
+        foreground: root.foreground
+        hasCursor: friendRow.hasCursor
+        onToggled: if (friendRow.friend) root.unwatchFriend(friendRow.friend.id)
+        onHovered: function (on) { if (on) root.setCursor(friendRow.navIndex) }
+        Layout.alignment: Qt.AlignVCenter
+
+        PanelToolTip {
+          visible: unwatchSwitch.containsMouse
+          text: "Stop watching"
+          fontFamily: root.fontFamily
+        }
+      }
+    }
+  }
+
+  // Picks the next friend to watch from everyone the bridge lists; the value resets so the label stays an invitation.
+  component WatchRow: CursorSurface {
+    id: watchRow
+    readonly property int navIndex: root.indexOfRow("watch", -1)
+
+    hasCursor: root.cursorActive && root.rowIndex === navIndex
+    foreground: root.foreground
+    implicitHeight: watchContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      acceptedButtons: Qt.NoButton
+      onEntered: root.setCursor(watchRow.navIndex)
+    }
+
+    RowLayout {
+      id: watchContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+
+      SearchableDropdown {
+        id: watchPicker
+        Layout.fillWidth: true
+        showLabel: false
+        triggerLabel: "Watch a friend"
+        placeholderText: "Search friends..."
+        emptyText: "No such friend"
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        options: discord.watchableFriends
+        value: ""
+        hasCursor: watchRow.hasCursor
+        Component.onCompleted: root.watchControl = watchPicker
+        Component.onDestruction: if (root.watchControl === watchPicker) root.watchControl = null
+        onChanged: function (picked) {
+          root.watchFriend(picked)
+          watchPicker.value = ""
+        }
+        onHovered: function (on) { if (on) root.setCursor(watchRow.navIndex) }
       }
     }
   }
