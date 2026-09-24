@@ -49,7 +49,7 @@ Panel {
   readonly property string channelsHint: {
     if (!discord.running) return ""
     if (!discord.rpc.configured || discord.rpc.unauthorized) return "Adding channels needs the voice controls above."
-    if (discord.voiceKnown && favouriteChannels.length === 0) return "Pick a voice channel to join it from here in one press."
+    if (discord.voiceKnown && favouriteChannels.length === 0) return "Pick a voice channel to join it from here in one press; its bell tells you when someone joins it."
     return ""
   }
   // The searchable dropdowns live inside inline components, so the cursor reaches them through these handles.
@@ -121,6 +121,17 @@ Panel {
 
   function unfavouriteChannel(id) {
     persist("favouriteChannels", Model.removeEntry(root.favouriteChannels, id))
+  }
+
+  function setChannelWatch(id, on) {
+    persist("favouriteChannels", Model.setFavouriteWatch(root.favouriteChannels, id, on))
+  }
+
+  // w on a channel row is the bell: watch it, or stop.
+  function watchCursor() {
+    if (!currentRow || currentRow.kind !== "channel") return
+    var row = discord.favouriteRows[currentRow.key]
+    if (row) setChannelWatch(row.id, !row.watch)
   }
 
   // x on a row removes what the row's trailing control removes.
@@ -468,6 +479,7 @@ Panel {
         else if (t === "m" || t === "M") discord.toggleMic()
         else if (t === "d" || t === "D") discord.toggleDeaf()
         else if (t === "r" || t === "R") discord.refresh()
+        else if (t === "w" || t === "W") root.watchCursor()
       }
 
       // Inert while everything fits; the safety net for a panel with every section open and a long watch list.
@@ -922,8 +934,8 @@ Panel {
                 width: parent.width
                 kind: "notifyPopup"
                 glyph: "󰂚"
-                label: "Popup when a watched friend comes online"
-                sub: root.notifyPopup ? "Shown by the shell, click raises Discord" : "Off"
+                label: "Popup for watched friends and channels"
+                sub: root.notifyPopup ? "A friend coming online, or someone joining a watched channel" : "Off"
                 checked: root.notifyPopup
                 onToggled: root.persist("notifyPopup", !root.notifyPopup)
               }
@@ -943,7 +955,7 @@ Panel {
                 kind: "notifyTest"
                 glyph: "󰑐"
                 label: "Send a test notification"
-                sub: "The popup and the sound an arrival would make"
+                sub: "The popup and the sound any arrival would make"
                 onTriggered: discord.notifyTest()
               }
 
@@ -1880,13 +1892,23 @@ Panel {
           Layout.fillWidth: true
           text: channelRow.row
             ? Model.channelSub(channelRow.row.guild, channelRow.row.count, channelRow.row.joined, channelRow.row.joining,
-                               channelRow.failed ? discord.joinError : "")
+                               channelRow.failed ? discord.joinError : "", channelRow.row.members)
             : ""
           color: channelRow.failed ? root.urgent : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
         }
+      }
+
+      // The bell watches the channel: a popup and a sound when someone joins it while you are elsewhere.
+      PanelActionButton {
+        iconText: "󰂚"
+        tooltipText: channelRow.row && channelRow.row.watch ? "Stop watching" : "Tell me when someone joins"
+        fontFamily: root.fontFamily
+        foreground: channelRow.row && channelRow.row.watch ? root.foreground : root.dim
+        onClicked: if (channelRow.row) root.setChannelWatch(channelRow.row.id, !channelRow.row.watch)
+        Layout.alignment: Qt.AlignVCenter
       }
 
       // Network's forget idiom: a small urgent-on-hover button, and x on the row does the same.

@@ -384,9 +384,45 @@ TestCase {
     compare(Model.channelSub("Srv", 3, false, false, "No permission to join"), "No permission to join")
     compare(Model.channelSub("Srv", 3, true, false, ""), "Srv · connected · press to leave")
     compare(Model.channelSub("Srv", 3, false, false, ""), "Srv · 3 in call")
+    compare(Model.channelSub("Srv", 3, false, false, "", ["Fabsi", "Pixel"]), "Srv · Fabsi, Pixel")
     compare(Model.channelSub("Srv", 0, false, false, ""), "Srv · empty")
     compare(Model.channelSub("Srv", -1, false, false, ""), "Srv")
     compare(Model.channelSub("", -1, false, false, ""), "")
+  }
+
+  function test_memberSummary_caps_the_names_it_shows() {
+    compare(Model.memberSummary([]), "")
+    compare(Model.memberSummary(["Fabsi", "", "Pixel"]), "Fabsi, Pixel")
+    compare(Model.memberSummary(["a", "b", "c", "d", "e"]), "a, b, c +2")
+  }
+
+  function test_setFavouriteWatch_flags_one_entry_and_keeps_the_rest() {
+    var list = [{ id: "1", name: "General" }, { id: "2", name: "AFK" }]
+    var on = Model.setFavouriteWatch(list, "2", true)
+    verify(on[1].watch)
+    verify(on[0].watch !== true)
+    compare(on[1].name, "AFK")
+    verify(Model.setFavouriteWatch(on, "2", false)[1].watch === false)
+    verify(Model.favouriteRows(on, {}, "", "", { "2": ["Fabsi"] })[1].watch)
+    compare(Model.favouriteRows(on, {}, "", "", { "2": ["Fabsi"] })[1].members, ["Fabsi"])
+  }
+
+  function test_channelArrivals_only_for_watched_channels_you_are_not_in() {
+    var favourites = [{ id: "1", name: "General", watch: true }, { id: "2", name: "AFK" }, { id: "3", name: "Mine", watch: true }]
+    var before = { "1": ["Bene"], "2": [], "3": [] }
+    var now = { "1": ["Bene", "Fabsi", "Pixel"], "2": ["Someone"], "3": ["Jojo"] }
+    var arrivals = Model.channelArrivals(before, now, favourites, "3")
+    compare(arrivals.length, 1)
+    compare(arrivals[0].id, "1")
+    compare(arrivals[0].names, ["Fabsi", "Pixel"])
+    compare(Model.channelArrivals({}, now, favourites, "").length, 0)
+    compare(Model.channelArrivals(before, before, favourites, "").length, 0)
+  }
+
+  function test_arrivalHeadline_reads_naturally() {
+    compare(Model.arrivalHeadline(["Fabsi"], "Fummelparty"), "Fabsi joined #Fummelparty")
+    compare(Model.arrivalHeadline(["Fabsi", "Pixel"], "Fummelparty"), "Fabsi and Pixel joined #Fummelparty")
+    compare(Model.arrivalHeadline(["a", "b", "c", "d"], "#x"), "a, b and 2 more joined #x")
   }
 
   function test_matchFavourite_prefers_exact_then_substring() {

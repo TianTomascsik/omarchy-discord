@@ -564,13 +564,57 @@ def refresh_counts_only_the_channels_it_is_asked_about():
     fake = FakeRpc()
     fake.answers = {
         "GET_SELECTED_VOICE_CHANNEL": {},
-        "GET_CHANNEL": lambda args: {"1": {"voice_states": [{}, {}]}, "2": {"voice_states": []}}.get(args["channel_id"])
+        "GET_CHANNEL": lambda args: {"1": {"voice_states": [{"nick": "Fabsi", "user": {"username": "fabsi"}}, {"user": {"global_name": "Pixel"}}]},
+                                     "2": {"voice_states": []}}.get(args["channel_id"])
         or (_ for _ in ()).throw(rpc.RpcRejected("Unknown Channel", 4005)),
     }
     bridge = rpc.Bridge(fake)
     with contextlib.redirect_stdout(io.StringIO()):
         bridge.handle_command('{"cmd":"refresh","channels":["1","2","3","general"]}')
     check("counts come back per channel", bridge.state["channelCounts"] == {"1": 2, "2": 0}, bridge.state["channelCounts"])
+    check("and so do the names, nick first", bridge.state["channelMembers"] == {"1": ["Fabsi", "Pixel"], "2": []}, bridge.state["channelMembers"])
+
+
+def refresh_subscribes_to_voice_states_of_the_favourites():
+    fake = FakeRpc()
+    fake.answers = {"GET_SELECTED_VOICE_CHANNEL": {}, "GET_CHANNEL": {"voice_states": []}}
+    subscribed = []
+    unsubscribed = []
+    fake.subscribe = lambda event, args=None: subscribed.append((event, (args or {}).get("channel_id"))) or "0"
+    fake.unsubscribe = lambda event, args=None: unsubscribed.append((event, (args or {}).get("channel_id"))) or "0"
+    bridge = rpc.Bridge(fake)
+    with contextlib.redirect_stdout(io.StringIO()):
+        bridge.handle_command('{"cmd":"refresh","channels":["1","2"]}')
+    voice = [s for s in subscribed if s[0].startswith("VOICE_STATE")]
+    check("each favourite gets a create and a delete subscription",
+          sorted(voice) == [("VOICE_STATE_CREATE", "1"), ("VOICE_STATE_CREATE", "2"), ("VOICE_STATE_DELETE", "1"), ("VOICE_STATE_DELETE", "2")], voice)
+    with contextlib.redirect_stdout(io.StringIO()):
+        bridge.handle_command('{"cmd":"refresh","channels":["1"]}')
+    check("a dropped favourite is unsubscribed", sorted(unsubscribed) == [("VOICE_STATE_CREATE", "2"), ("VOICE_STATE_DELETE", "2")], unsubscribed)
+    check("and not subscribed twice", len([s for s in subscribed if s[0].startswith("VOICE_STATE")]) == 4, subscribed)
+
+
+def a_voice_state_event_rereads_the_favourites():
+    frame = (rpc.OP_FRAME, {"cmd": "DISPATCH", "evt": "VOICE_STATE_CREATE", "data": {"user": {"username": "fabsi"}}})
+    fake = FakeRpc([frame])
+    fake.answers = {"GET_SELECTED_VOICE_CHANNEL": {}, "GET_CHANNEL": {"voice_states": [{"user": {"username": "fabsi"}}]}}
+    bridge = rpc.Bridge(fake)
+    bridge.counted = ["1"]
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        try:
+            bridge.run()
+        except rpc.RpcError:
+            pass
+    lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    check("a join in a watched channel lands in the snapshot as a name",
+          any(line.get("channelMembers", {}).get("1") == ["fabsi"] for line in lines), lines)
+
+
+def member_name_prefers_nick_then_display_name():
+    check("nick wins", rpc.member_name({"nick": "Fab", "user": {"global_name": "Fabsi", "username": "fabsi"}}) == "Fab")
+    check("then the display name", rpc.member_name({"user": {"global_name": "Fabsi", "username": "fabsi"}}) == "Fabsi")
+    check("then the username", rpc.member_name({"user": {"username": "fabsi"}}) == "fabsi")
+    check("an empty state is an empty name", rpc.member_name({}) == "")
 
 
 def has_scope_reads_discords_space_separated_list():
@@ -610,6 +654,9 @@ def main():
                  a_join_reply_clears_the_pending_nonce,
                  a_channel_select_clears_the_join_error_and_names_the_id,
                  refresh_counts_only_the_channels_it_is_asked_about,
+                 refresh_subscribes_to_voice_states_of_the_favourites,
+                 a_voice_state_event_rereads_the_favourites,
+                 member_name_prefers_nick_then_display_name,
                  a_cached_token_is_never_reprompted,
                  a_first_authorization_asks_for_voice_only_once,
                  a_refused_authorization_is_fatal_not_a_loop,

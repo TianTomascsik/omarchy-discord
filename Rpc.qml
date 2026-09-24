@@ -44,8 +44,9 @@ Item {
   property string friendsScope: "missing"
   // The channel the client sits in, by id, so a favourite reads as joined by identity and not by name.
   property string channelId: ""
-  // {"123": 2} occupancy for the favourites the last refresh asked about.
+  // {"123": 2} occupancy for the favourites the last refresh asked about, and {"123": ["Fabsi"]} who is there.
   property var channelCounts: ({})
+  property var channelMembers: ({})
   // {"channelId":"123","code":4005,"message":"..."} for the last refused join, empty otherwise.
   property var joinError: ({})
   // [{id, name, channels:[{id, name}]}] once listChannels() has been answered; cached per bridge session.
@@ -67,6 +68,7 @@ Item {
     friendsOk = false
     channelId = ""
     channelCounts = {}
+    channelMembers = {}
     joinError = {}
     channelGuilds = []
   }
@@ -118,8 +120,8 @@ Item {
       root.probing = false
       root.error = String(state.error || "Discord RPC failed")
       root.ready = false
-      // A fatal line is worth a trace in the shell log, since the bridge exits right after it.
-      if (root.unauthorized) console.warn("omarchy-discord bridge: " + root.error)
+      // Every failed session is worth a trace in the shell log, where support looks first.
+      console.warn("omarchy-discord bridge: " + root.error)
       return
     }
 
@@ -140,6 +142,7 @@ Item {
     root.friendsScope = String(state.friendsScope || "missing")
     root.channelId = String(state.channelId || "")
     root.channelCounts = state.channelCounts && typeof state.channelCounts === "object" ? state.channelCounts : {}
+    root.channelMembers = state.channelMembers && typeof state.channelMembers === "object" ? state.channelMembers : {}
     root.joinError = state.joinError && typeof state.joinError === "object" ? state.joinError : {}
     root.unauthorized = false
     root.ready = true
@@ -181,6 +184,7 @@ Item {
     onRunningChanged: if (!running) root.clear()
 
     onExited: function (exitCode) {
+      console.warn("omarchy-discord bridge exited with " + exitCode + (root.active ? "" : " while Discord was down"))
       // Discord quitting takes the bridge with it, and that is not a failure to count.
       if (!root.active || exitCode === root.exitUnconfigured || exitCode === root.exitUnauthorized) return
       root.holdOff = true

@@ -609,8 +609,9 @@ function findChannel(guilds, id) {
 }
 
 // One row per favourite; count is -1 until the bridge has answered for that channel.
-function favouriteRows(favourites, counts, callChannelId, pendingJoin) {
+function favouriteRows(favourites, counts, callChannelId, pendingJoin, members) {
   var known = counts || {}
+  var names = members || {}
   var out = []
   var list = favourites || []
   for (var i = 0; i < list.length; i++) {
@@ -622,6 +623,8 @@ function favouriteRows(favourites, counts, callChannelId, pendingJoin) {
       name: String(entry.name || id),
       guild: String(entry.guild || ""),
       count: known[id] === undefined ? -1 : Number(known[id]),
+      members: names[id] instanceof Array ? names[id] : [],
+      watch: entry.watch === true,
       joined: id === String(callChannelId || ""),
       joining: id === String(pendingJoin || "")
     })
@@ -629,13 +632,71 @@ function favouriteRows(favourites, counts, callChannelId, pendingJoin) {
   return out
 }
 
-function channelSub(guild, count, joined, joining, error) {
+var MEMBER_NAMES_SHOWN = 3
+
+// "Fabsi, Pixel" or "Fabsi, Pixel, Bene +2": who is in the channel, short enough for a caption.
+function memberSummary(names) {
+  var list = (names || []).filter(function (name) { return String(name || "") !== "" })
+  if (list.length === 0) return ""
+  var shown = list.slice(0, MEMBER_NAMES_SHOWN).join(", ")
+  return list.length > MEMBER_NAMES_SHOWN ? shown + " +" + (list.length - MEMBER_NAMES_SHOWN) : shown
+}
+
+function channelSub(guild, count, joined, joining, error, members) {
   if (joining) return "Joining..."
   if (error) return String(error)
   var where = String(guild || "")
-  var state = joined ? "connected · press to leave" : (count > 0 ? count + " in call" : (count === 0 ? "empty" : ""))
+  var who = memberSummary(members)
+  var state = joined ? "connected · press to leave" : (who !== "" ? who : (count > 0 ? count + " in call" : (count === 0 ? "empty" : "")))
   if (where === "") return state
   return state === "" ? where : where + " · " + state
+}
+
+// The watch flag lives on the favourite itself, so the two lists never drift apart.
+function setFavouriteWatch(favourites, id, on) {
+  var key = String(id || "")
+  var out = []
+  var list = favourites || []
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i]
+    if (!entry) continue
+    if (String(entry.id) === key) {
+      var copy = {}
+      for (var field in entry) copy[field] = entry[field]
+      copy.watch = on === true
+      out.push(copy)
+    } else {
+      out.push(entry)
+    }
+  }
+  return out
+}
+
+// Names newly present in a watched favourite the user is not sitting in; a first snapshot never counts.
+function channelArrivals(previous, members, favourites, callChannelId) {
+  var before = previous || {}
+  var now = members || {}
+  var out = []
+  var list = favourites || []
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i]
+    if (!entry || entry.watch !== true || entry.id === undefined) continue
+    var id = String(entry.id)
+    if (id === String(callChannelId || "") || !(before[id] instanceof Array) || !(now[id] instanceof Array)) continue
+    var fresh = now[id].filter(function (name) { return before[id].indexOf(name) === -1 && String(name || "") !== "" })
+    if (fresh.length > 0) out.push({ id: id, name: String(entry.name || id), names: fresh })
+  }
+  return out
+}
+
+// "Fabsi joined #Fummelparty", "Fabsi and Pixel joined", "Fabsi, Pixel and 2 more joined".
+function arrivalHeadline(names, channelName) {
+  var list = names || []
+  var who
+  if (list.length === 1) who = list[0]
+  else if (list.length === 2) who = list[0] + " and " + list[1]
+  else who = list[0] + ", " + list[1] + " and " + (list.length - 2) + " more"
+  return who + " joined " + channelLabel(channelName)
 }
 
 function favouriteName(favourites, id) {

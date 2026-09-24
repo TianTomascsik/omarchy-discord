@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.thisisgm.discord",
   "name": "Discord",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "author": "GM",
   "license": "MIT",
   "description": "Discord in the Omarchy bar: attention badge, call state, volume, window focus, memory footprint, a workspace preset, favourite voice channels you join in one press, and friend online notifications.",
@@ -67,7 +67,7 @@
       {
         "key": "favouriteChannels",
         "type": "array",
-        "label": "Voice channels to join from the panel",
+        "label": "Voice channels with a join row; watch: true on one announces who joins it",
         "defaultValue": []
       },
       {

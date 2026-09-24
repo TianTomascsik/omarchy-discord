@@ -117,6 +117,7 @@ voice call. The dot is urgent-colored whenever the call cannot hear you.
 | `j` `k`, `Enter` | move and activate; `h` `l` set volume on the volume row |
 | `Enter` on a section header | fold or unfold it; the fold is remembered |
 | `x` on a channel or friend row | remove it from the favourites or the watch list |
+| `w` on a channel row | watch it, or stop: the same as its bell |
 
 Every section folds. A folded header keeps its one-line summary on the right,
 "3 · silent" for the workspace, "2 online" for friends, the call's name for
@@ -197,6 +198,15 @@ server and, once the bridge has looked, how many people are in the channel.
 Joining goes through Discord's own `SELECT_VOICE_CHANNEL`, so it needs the
 bridge; the rows still show without it, and pressing one says so.
 
+Each row also shows who is in the channel, live: the bridge subscribes to
+Discord's voice-state events for every favourite, so names appear the moment
+someone joins. The bell on a row (or `w` on the keyboard) **watches** the
+channel: when someone joins it while you are elsewhere, you get the same popup
+and sound a friend's arrival makes, "Fabsi joined #Fummelparty", and pressing
+the popup joins you too. People arriving together are one popup, a channel is
+announced at most every thirty seconds, and nothing is announced for the
+channel you are sitting in.
+
 ## Friend notifications
 
 The panel's **Friends** section lets you watch friends and be told when they
@@ -236,7 +246,8 @@ nobody is announced for merely already being online; a friend added to the
 list while online is not an arrival; and one friend cannot fire more than
 once a minute.
 
-An arrival is a popup and a sound, each with its own switch in the Friends
+An arrival, whether a friend coming online or someone joining a watched
+channel, is a popup and a sound, each with its own switch in the Friends
 section. Omarchy's notification server plays nothing itself, so the sound is
 the plugin's: the freedesktop "message-new-instant" sound through PipeWire
 (`pw-play`), or any file you name in the `notifySoundFile` setting.

@@ -65,6 +65,17 @@ command is sent fire and forget so a slow join never blocks the call state;
 a refusal lands in the snapshot as `joinError` with the code, and
 `VOICE_CHANNEL_SELECT` is the success.
 
+# Who is in a channel, live
+
+`SUBSCRIBE VOICE_STATE_CREATE {"channel_id"}` and its `_DELETE` twin work per
+favourite under `rpc.voice.read`, and a join in a watched channel arrived as
+an event within a second of it happening. The event carries the voice state
+but not the channel id, so the bridge answers any of them by re-reading every
+favourite with `GET_CHANNEL`, whose `voice_states` give the members: `nick`
+first, then `global_name`, then `username`. A dropped favourite is
+unsubscribed on the next refresh. The channel the user sits in already has
+SPEAKING subscriptions; a second pair for it is harmless.
+
 # Still to measure
 
 The codes a live socket returns for a stale id and for a channel without

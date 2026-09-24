@@ -199,7 +199,73 @@ Item {
 
   readonly property bool channelsKnown: bridge.channelGuilds.length > 0
   readonly property var channelOptions: Model.channelOptions(bridge.channelGuilds, favouriteChannels)
-  readonly property var favouriteRows: Model.favouriteRows(favouriteChannels, bridge.channelCounts, callChannelId, pendingJoin)
+  readonly property var favouriteRows: Model.favouriteRows(favouriteChannels, bridge.channelCounts, callChannelId, pendingJoin, bridge.channelMembers)
+
+  // ------------------------------------------------------------ channel watch
+
+  // Arrivals in a watched favourite: the first member list after a connect only seeds, and a burst is one popup.
+  property var lastMembers: ({})
+  property bool membersSeeded: false
+  property var pendingArrivals: ({})
+  property var lastChannelNotifiedAt: ({})
+  readonly property int arrivalBatchMs: 2500
+  readonly property int channelCooldownMs: 30000
+
+  Connections {
+    target: bridge
+    function onChannelMembersChanged() { root.trackMembers() }
+    function onReadyChanged() {
+      if (bridge.ready) return
+      root.membersSeeded = false
+      root.lastMembers = {}
+    }
+  }
+
+  function trackMembers() {
+    if (!voiceKnown) return
+    if (!membersSeeded) {
+      lastMembers = bridge.channelMembers
+      membersSeeded = true
+      return
+    }
+    var arrivals = Model.channelArrivals(lastMembers, bridge.channelMembers, favouriteChannels, callChannelId)
+    lastMembers = bridge.channelMembers
+    for (var i = 0; i < arrivals.length; i++) {
+      var batch = pendingArrivals[arrivals[i].id] || { name: arrivals[i].name, names: [] }
+      batch.names = batch.names.concat(arrivals[i].names)
+      pendingArrivals[arrivals[i].id] = batch
+    }
+    if (arrivals.length > 0) arrivalTimer.restart()
+  }
+
+  Timer {
+    id: arrivalTimer
+    interval: root.arrivalBatchMs
+    onTriggered: root.flushArrivals()
+  }
+
+  function flushArrivals() {
+    var now = Date.now()
+    for (var id in pendingArrivals) {
+      var batch = pendingArrivals[id]
+      if (now - (lastChannelNotifiedAt[id] || 0) >= channelCooldownMs) {
+        lastChannelNotifiedAt[id] = now
+        notifyArrival(batch.name, batch.names)
+      }
+    }
+    pendingArrivals = {}
+  }
+
+  // Same popup and sound switches as a friend's arrival; clicking the toast joins that channel.
+  function notifyArrival(channelName, names) {
+    var headline = Model.arrivalHeadline(names, channelName)
+    console.log("omarchy-discord notify: " + headline)
+    if (notifyPopup) {
+      Util.execArgv(["omarchy-notification-send", "--app-name", "Discord", "-g", "󰋋", "-u", "normal",
+        headline, "Press to join", "--exec", "omarchy-shell", "discord", "join", String(channelName)])
+    }
+    if (notifySound) Util.execArgv(["pw-play", soundFile])
+  }
 
   // Asked once per bridge session, when the picker opens; 48 round trips are not worth doing unasked.
   function requestChannels() {

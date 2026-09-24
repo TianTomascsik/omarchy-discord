@@ -6,6 +6,12 @@ description: What changed in this bundle and when
 
 # Log
 
+## 2026-09-25, later
+
+Favourites gained a live member list and a bell: `discord-rpc-voice-channels`
+records the per-channel VOICE_STATE subscriptions as measured, and the
+arrival popup joins the friend popup behind the same two switches.
+
 ## 2026-09-25
 
 The panel gained folding sections and favourite voice channels.

@@ -380,6 +380,12 @@ def grant_friends_scope(client_id, client_secret):
     return token
 
 
+# a voice state reads {"nick": "GM", "user": {"id": "1", "username": "gm", "global_name": "GM"}, "voice_state": {...}}
+def member_name(entry):
+    user = entry.get("user") or {}
+    return str(entry.get("nick") or user.get("global_name") or user.get("username") or user.get("id") or "")
+
+
 # {"type": 1, "user": {"id": "1", "username": "gm", "global_name": "GM"}, "presence": {"status": "online"}}
 def friend_entry(data):
     """The (id, entry) a relationship payload describes; entry is None when it is not a friend."""
@@ -415,13 +421,15 @@ class Bridge:
         self.pending_joins = {}
         # The favourites the widget wants occupancy for, sent with each refresh.
         self.counted = []
+        # Favourites with a live VOICE_STATE subscription, so a join shows up without waiting for a poll.
+        self.watched = set()
         self.state = {"ok": True, "channel": "", "guild": "", "mute": False,
                       "deaf": False, "inputVolume": 100,
                       "speaking": [], "error": "",
                       "ping": 0, "voiceState": "",
                       "friends": [], "friendsOk": False, "friendsError": "",
                       "friendsScope": friends_scope,
-                      "channelId": "", "channelCounts": {}, "joinError": {}}
+                      "channelId": "", "channelCounts": {}, "channelMembers": {}, "joinError": {}}
 
     def emit_line(self, payload):
         sys.stdout.write(json.dumps(payload) + "\n")
@@ -458,13 +466,35 @@ class Bridge:
     # A refused channel is left out, so a missing key reads as unknown rather than empty.
     def load_counts(self):
         counts = {}
+        members = {}
         for channel_id in self.counted:
             try:
                 channel = self.rpc.request("GET_CHANNEL", {"channel_id": channel_id})
             except RpcRejected:
                 continue
-            counts[channel_id] = len(channel.get("voice_states") or [])
+            states = channel.get("voice_states") or []
+            counts[channel_id] = len(states)
+            members[channel_id] = [member_name(entry) for entry in states]
         self.state["channelCounts"] = counts
+        self.state["channelMembers"] = members
+
+    # One VOICE_STATE pair per favourite; the events carry no channel id, so any of them re-reads every favourite.
+    def watch_channels(self):
+        wanted = set(self.counted)
+        for channel_id in self.watched - wanted:
+            for event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
+                try:
+                    self.rpc.unsubscribe(event, {"channel_id": channel_id})
+                except RpcError:
+                    pass
+        for channel_id in wanted - self.watched:
+            try:
+                for event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
+                    self.rpc.subscribe(event, {"channel_id": channel_id})
+            except RpcRejected as error:
+                warn("Discord refused watching channel %s: %s" % (channel_id, error))
+                wanted.discard(channel_id)
+        self.watched = wanted
 
     def join(self, channel_id):
         """One SELECT_VOICE_CHANNEL, fire and forget; the reply is matched by nonce in run()."""
@@ -579,6 +609,8 @@ class Bridge:
             self.speaking.discard(data.get("user_id"))
         elif event == "RELATIONSHIP_UPDATE":
             return self.apply_relationship(data)
+        elif event in ("VOICE_STATE_CREATE", "VOICE_STATE_DELETE"):
+            self.load_counts()
         else:
             return False
         return True
@@ -653,6 +685,7 @@ class Bridge:
         selected = self.rpc.request("GET_SELECTED_VOICE_CHANNEL")
         self.select_channel(selected.get("id") if selected else None)
         self.load_friends()
+        self.watch_channels()
         self.load_counts()
         self.emit()
 
