@@ -6,6 +6,21 @@ description: What changed in this bundle and when
 
 # Log
 
+## 2026-09-24, in the fork
+
+Two facts joined the bundle while adding the workspace preset and friend
+notifications. `hyprland-dispatch-from-quickshell` records that a
+Lua-configured Hyprland rejects the legacy dispatcher strings outright, that
+`Hyprland.usingLua` is false for the first seconds of a Quickshell process,
+and that `HyprlandToplevel.address` lacks the `0x` Hyprland's selector needs,
+which had made the upstream focus action a silent no-op on Quickshell 0.3.1.
+Measured on Omarchy 4.0.2, Hyprland 0.56.2, Quickshell 0.3.1.
+
+`discord-rpc-relationships` is the first draft entry in the bundle: the calls
+and the scope come from Discord's documentation and the community reference,
+and the live handshake with `relationships.read` is recorded as unmeasured
+until someone with an application runs it.
+
 ## 2026-08-20
 
 Vesktop measured as a second supported client: `discord-window-identity` gains

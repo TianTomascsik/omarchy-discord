@@ -2,10 +2,24 @@
 
 A bar widget for the Discord desktop app, built the way the first-party
 Dropbox and Tailscale plugins are built: vector icon, keyboard-navigable
-panel, and no configuration.
+panel, and next to no configuration.
+
+This is a fork of [thisisgm/omarchy-discord](https://github.com/thisisgm/omarchy-discord)
+that adds two things and fixes one:
+
+- **A workspace preset.** Pick the workspace Discord opens on, and every
+  launch, whether from the bar, a keybinding or autostart, lands there.
+- **Friend notifications.** Watch the friends you care about and get a shell
+  notification the moment one of them comes online.
+- **Hyprland's Lua config.** The upstream focus action sends legacy dispatcher
+  strings, which a Lua-configured Hyprland rejects. Every dispatch now follows
+  `Hyprland.usingLua`.
+
+The upstream author's work is what makes all of this possible; the plugin id,
+credits and licence are unchanged.
 
 [![On omarchyplugins.com](https://img.shields.io/badge/omarchyplugins.com-listed-8b5cf6)](https://omarchyplugins.com/plugin.html?id=io.github.thisisgm.discord)
-[![Latest tag](https://img.shields.io/github/v/tag/thisisgm/omarchy-discord?label=version)](https://github.com/thisisgm/omarchy-discord/tags)
+[![Latest tag](https://img.shields.io/github/v/tag/TianTomascsik/omarchy-discord?label=version)](https://github.com/TianTomascsik/omarchy-discord/tags)
 
 ![The panel during a voice call](preview.png)
 
@@ -28,9 +42,11 @@ urgent color whenever the call cannot hear you, which is the state above.
 | How good is the call? | Discord RPC | `VOICE_CONNECTION_STATUS` ping, drawn as signal strength (optional tier) |
 | Can the call hear you? | PipeWire | the capture stream, and whether it is muted |
 | What does it cost? | `ps` | resident memory and process count |
+| Which friends are online? | Discord RPC | `GET_RELATIONSHIPS` and `RELATIONSHIP_UPDATE`, drawn as presence dots (optional tier) |
 
 Nothing polls Discord's servers, and no account, token, or developer
-application is involved.
+application is involved until you opt into the RPC tier at the bottom of
+this page.
 
 ## Requirements
 
@@ -44,11 +60,24 @@ application is involved.
   not pretend otherwise.
 - **python3**, and only for the optional voice bridge at the bottom of this
   page. Omarchy already ships it.
+- **Hyprland with either config dialect.** The plugin reads
+  `Hyprland.usingLua` and speaks `hl.dsp.*` to a Lua-configured compositor and
+  the classic `focuswindow` / `movetoworkspacesilent` strings to a `.conf` one.
 
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/thisisgm/omarchy-discord.git --enable
+omarchy plugin add https://github.com/TianTomascsik/omarchy-discord.git --enable
+```
+
+If the upstream plugin is already installed, point its checkout at this fork
+instead, since both carry the same plugin id:
+
+```bash
+cd ~/.config/omarchy/plugins/io.github.thisisgm.discord
+git remote set-url origin https://github.com/TianTomascsik/omarchy-discord.git
+git pull --ff-only
+omarchy restart shell
 ```
 
 Or, from a local checkout:
@@ -106,9 +135,54 @@ PipeWire level; with it, it presses Discord's own mute button.
 Each verb answers `ok`, or says why it did nothing: `no voice bridge`,
 `no microphone to mute`, `Discord is not installed`.
 
+## Open Discord on a chosen workspace
+
+The panel's **Workspace** section holds a dropdown of your ten bound workspaces
+plus any named ones Hyprland knows about. Pick one and the plugin moves
+Discord's first window there the moment it appears, whichever launcher opened
+it: the bar, `SUPER + D`, autostart or a tray unhide. Nothing is written to
+your Hyprland config, so unpicking it leaves no trace.
+
+By default the move is silent and you stay where you are. The **Switch to it**
+toggle, shown once a workspace is picked, follows the window instead. `Enter`
+on the row steps through the workspaces for keyboard use.
+
+The same two values from a shell:
+
+```bash
+omarchy bar set io.github.thisisgm.discord workspace 3
+omarchy bar set io.github.thisisgm.discord followWorkspace true --json
+omarchy bar set io.github.thisisgm.discord workspace '""' --json   # back to "anywhere"
+```
+
+## Friend notifications
+
+With the optional RPC tier below set up, the panel gains a **Friends** section.
+**Watch a friend** searches your friend list; each watched friend gets a row
+with a presence dot, their name and their status, and its switch stops
+watching. When a watched friend goes from offline to online, idle or do not
+disturb, the shell raises a notification, and clicking it raises Discord.
+
+Three things keep it quiet: the first list after a connect only seeds, so
+nobody is announced for merely already being online; a friend added to the
+list while online is not an arrival; and one friend cannot fire more than
+once a minute.
+
+Presence uses the theme like the rest of the panel: foreground for online,
+dim for idle, the urgent color for do not disturb, faint for offline. Friends
+who are invisible read as offline, which is what Discord shows everyone else
+too.
+
 ## Settings
 
-One, in Setup > Plugins: **hide the icon when Discord is not running**.
+Four, in Setup > Plugins or with `omarchy bar set`:
+
+| Key | Type | Does |
+|---|---|---|
+| `hideWhenStopped` | boolean | hide the icon when Discord is not running |
+| `workspace` | string | workspace id or name Discord opens on; `""` leaves it alone |
+| `followWorkspace` | boolean | switch to that workspace instead of moving silently |
+| `watchedFriends` | array of `{id, name}` | friends to announce; edited from the panel |
 
 ## Limits worth knowing
 
@@ -128,11 +202,12 @@ One, in Setup > Plugins: **hide the icon when Discord is not running**.
 Both limits go away with the optional bridge below, which drives Discord's own
 mute instead.
 
-## Optional: Discord's own voice controls
+## Optional: Discord's own voice controls and friend presence
 
-Everything above needs no account, token, or setup. Four things cannot be had
-that way, because nothing outside Discord knows them: **which** channel you are
-in, Discord's own mute and deafen, and hanging up.
+Everything above the Friends section needs no account, token, or setup. Five
+things cannot be had that way, because nothing outside Discord knows them:
+**which** channel you are in, Discord's own mute and deafen, hanging up, and
+which of your friends are online.
 
 Those come from Discord's local RPC socket, and Discord gates it. The socket
 refuses any client id that is not a registered application:
@@ -173,7 +248,17 @@ and `--setup` rejects it by name if you paste it.
 
 Open the panel afterwards, no restart needed, and it gains the call's name,
 deafen, mic gain, and a leave-call row, and the mic row starts driving
-Discord's own mute. `--probe` re-checks it any time.
+Discord's own mute. `--probe` re-checks it any time, and says whether friend
+presence was granted.
+
+The bridge asks for four scopes: `rpc`, `rpc.voice.read`, `rpc.voice.write`
+and `relationships.read`. The last one is what the friend list rides on, and
+Discord documents it as approval-gated in the same way as `rpc`: the
+application's owner and its App Testers can grant it to themselves, nobody
+else can. If Discord refuses it, the bridge falls back to the three voice
+scopes, the Friends section says so, and everything else keeps working. The
+refusal is remembered in the token so Discord's consent modal does not
+reappear on every connect; run `--setup` again to retry.
 
 If you are not the application's owner, your account has to be on its **App
 Testers** list; the owner is already covered.
@@ -191,9 +276,10 @@ the tray entry you unticked, if you got that far.
 
 ## Contributing
 
-Patches and bug reports are welcome. `CONTRIBUTING.md` has the two-copy layout,
-how to test a change against a running shell, and the house rules the code is
-held to.
+Patches and bug reports are welcome, here for the fork's features and
+[upstream](https://github.com/thisisgm/omarchy-discord) for everything the
+two share. `CONTRIBUTING.md` has the two-copy layout, how to test a change
+against a running shell, and the house rules the code is held to.
 
 The platform facts this depends on, such as how PipeWire names Discord's
 streams and what the RPC handshake refuses, live in `knowledge/` as an
@@ -203,8 +289,8 @@ does not have to rediscover them.
 
 ## Support
 
-If this saved you an afternoon, you can
-[buy me a coffee](https://buymeacoffee.com/thisisgm).
+If this saved you an afternoon, the upstream author takes
+[coffee](https://buymeacoffee.com/thisisgm).
 
 ## License
 

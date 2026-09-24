@@ -10,8 +10,8 @@ tags: [omarchy, discord, quickshell]
 An [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 bundle. One file per fact, each carrying YAML frontmatter with a `type`.
 
-Every fact here was measured on a running machine, Omarchy 4.0.0 with the Arch
-`discord` package, rather than inferred from documentation. Where a fact was not
+Every fact here was measured on a running machine, Omarchy 4.0.0 and later
+4.0.2 with the Arch `discord` package, rather than inferred from documentation. Where a fact was not
 observable, the file says so in its own words instead of guessing. `log.md`
 records what changed and when.
 
@@ -25,3 +25,5 @@ records what changed and when.
 | [qt-svg-arc-flags](qt-svg-arc-flags.md) | why the shipped icon path has no arcs left in it |
 | [omarchy-bar-icon-weight](omarchy-bar-icon-weight.md) | matching a bar icon to its neighbours is about ink, not height |
 | [plugin-design-decisions](plugin-design-decisions.md) | the choices that are not obvious from the code, and what each one cost |
+| [hyprland-dispatch-from-quickshell](hyprland-dispatch-from-quickshell.md) | the Lua dispatch wrapper, and the 0x that Quickshell drops from every window address |
+| [discord-rpc-relationships](discord-rpc-relationships.md) | where friend presence comes from, and how the scope behind it is gated |

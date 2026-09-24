@@ -21,6 +21,11 @@ Hot reload is unreliable. Twice during development a saved change logged
 change does not appear, run `omarchy restart shell` and wait about eight
 seconds before concluding anything about your edit.
 
+If the shell loads this plugin from a git checkout, which is what
+`omarchy plugin add` leaves behind, the copy can simply track this fork:
+`git remote set-url origin https://github.com/TianTomascsik/omarchy-discord.git`
+once, then `omarchy plugin update io.github.thisisgm.discord` after every push.
+
 ## Testing
 
 ```bash
@@ -42,6 +47,11 @@ source and obvious in a screenshot taken two seconds after opening the panel:
 grim -g "0,0 2560x32" /tmp/bar.png       # the bar
 grim -g "2130,28 420x460" /tmp/panel.png # the panel, once opened
 ```
+
+The friends section is testable the same way: the stub's lines carry
+`friends`, `friendsOk` and `friendsError`, and `Service.qml` only ever reads
+those. The bridge's own parsing is covered in `test_rpc.py` with the payload
+shapes Discord documents.
 
 The RPC panel is testable without Discord credentials. Swap the live copy's
 `rpc.py` for a stub that prints the same one-JSON-object-per-line state, restart
