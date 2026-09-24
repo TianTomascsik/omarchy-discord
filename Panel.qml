@@ -23,9 +23,14 @@ Panel {
   // "" leaves Discord wherever Hyprland puts it; anything else is a workspace id or name.
   readonly property string workspacePreset: String(setting("workspace", ""))
   readonly property bool followWorkspace: setting("followWorkspace", false) === true
-  readonly property var watchedFriends: Model.watchedList(settings ? settings.watchedFriends : null)
+  readonly property var watchedFriends: Model.entryList(settings ? settings.watchedFriends : null)
+  readonly property var favouriteChannels: Model.entryList(settings ? settings.favouriteChannels : null)
+  // Folded headers, remembered in shell.json; null means the defaults have never been touched.
+  readonly property var collapsedSections: Model.collapsedList(setting("collapsed", null))
   readonly property var workspaceOptions: Model.workspaceOptions(discord.workspaces)
-  readonly property int presetDropdownWidth: Style.space(170)
+  readonly property int presetDropdownWidth: Style.space(130)
+  // Measured in a call with the defaults open: 640 scrolled by a header, 720 does not, and the screen has 1690.
+  readonly property int panelHeightCap: Style.space(720)
 
   // The section is always there while Discord runs, so the hint can say where presence comes from.
   readonly property bool friendsVisible: discord.running
@@ -35,14 +40,24 @@ Panel {
     if (discord.friendsError !== "") return discord.friendsError
     return "Presence comes from the OmarchyDiscord plugin for BetterDiscord, shipped in this repo's betterdiscord folder. See the README to enable it."
   }
-  // The searchable dropdown lives inside an inline component, so the cursor reaches it through this handle.
+  // Favourites show whenever they exist, since a press on one can start Discord itself.
+  readonly property bool channelsVisible: discord.installed && (favouriteChannels.length > 0 || discord.voiceKnown)
+  readonly property string channelsHint: {
+    if (!discord.running) return ""
+    if (!discord.rpc.configured || discord.rpc.unauthorized) return "Adding channels needs the voice controls above."
+    if (discord.voiceKnown && favouriteChannels.length === 0) return "Pick a voice channel to join it from here in one press."
+    return ""
+  }
+  // The searchable dropdowns live inside inline components, so the cursor reaches them through these handles.
   property var watchControl: null
+  property var channelControl: null
   readonly property real volumeStep: 0.05
   // Discord's own input volume is a 0-100 percentage, not a PipeWire ratio.
   readonly property int gainStep: 5
 
   // Discord's own call controls exist only while the bridge is in a call.
   readonly property bool callControls: discord.rpc.inVoice
+  readonly property bool voiceVisible: discord.inVoice || discord.hasPlayback
 
   // The mic row draws inside the voice section, so the cursor has to use the same test.
   readonly property bool micRowVisible: discord.hasMicControl && !callControls
@@ -73,6 +88,14 @@ Panel {
     root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
+  function isCollapsed(id) {
+    return Model.isCollapsed(root.collapsedSections, id)
+  }
+
+  function toggleSection(id) {
+    persist("collapsed", Model.toggleCollapsed(root.collapsedSections, id))
+  }
+
   function watchFriend(id) {
     var name = String(id || "")
     if (name === "") return
@@ -83,7 +106,24 @@ Panel {
   }
 
   function unwatchFriend(id) {
-    persist("watchedFriends", Model.removeWatched(root.watchedFriends, id))
+    persist("watchedFriends", Model.removeEntry(root.watchedFriends, id))
+  }
+
+  function favouriteChannel(id) {
+    var channel = Model.findChannel(discord.rpc.channelGuilds, id)
+    if (!channel) return
+    persist("favouriteChannels", Model.addFavourite(root.favouriteChannels, channel))
+  }
+
+  function unfavouriteChannel(id) {
+    persist("favouriteChannels", Model.removeEntry(root.favouriteChannels, id))
+  }
+
+  // x on a row removes what the row's trailing control removes.
+  function deleteCursor() {
+    if (!currentRow) return
+    if (currentRow.kind === "friend") unwatchFriend(discord.watchedRows[currentRow.key].id)
+    else if (currentRow.kind === "channel") unfavouriteChannel(discord.favouriteRows[currentRow.key].id)
   }
 
   // No green in the palette, so reachable is foreground, busy is urgent, gone is faint.
@@ -126,37 +166,67 @@ Panel {
   property bool cursorActive: false
   property int rowIndex: 0
 
-  // Cursor stops in draw order; rows look themselves up by kind, so nothing desyncs.
+  // Cursor stops in draw order: a header, then its rows while it is open; rows look themselves up by kind and key.
   readonly property var navRows: {
     var list = []
     if (discord.installed) list.push({ kind: "power" })
-    if (callControls || micRowVisible) list.push({ kind: "mic" })
-    if (callControls) list.push({ kind: "deafen" })
-    if (callControls) list.push({ kind: "hangup" })
-    if (callControls) list.push({ kind: "gain" })
-    if (discord.hasPlayback) list.push({ kind: "volume" })
-    if (discord.rpc.unauthorized && !setupOpen) list.push({ kind: "reauth" })
-    if (setupVisible && !setupOpen) list.push({ kind: "setup" })
-    for (var i = 0; i < discord.windows.length; i++) list.push({ kind: "window", itemIndex: i })
-    // The window rows already focus Discord, so this row is only for when there is none.
-    if (!discord.hasWindow) list.push({ kind: "open" })
-    list.push({ kind: "workspace" })
-    if (root.workspacePreset !== "") list.push({ kind: "follow" })
-    if (root.friendsVisible) {
-      if (discord.friendsGrantable) list.push({ kind: "grant" })
-      for (var f = 0; f < discord.watchedRows.length; f++) list.push({ kind: "friend", itemIndex: f })
-      if (discord.watchableFriends.length > 0) list.push({ kind: "watch" })
+    if (voiceVisible) {
+      list.push({ kind: "section", key: "voice" })
+      if (!isCollapsed("voice")) {
+        if (callControls || micRowVisible) list.push({ kind: "mic" })
+        if (callControls) list.push({ kind: "deafen" })
+        if (callControls) list.push({ kind: "hangup" })
+        if (callControls) list.push({ kind: "gain" })
+        if (discord.hasPlayback) list.push({ kind: "volume" })
+      }
+    }
+    if (setupVisible) {
+      list.push({ kind: "section", key: "setup" })
+      if (!isCollapsed("setup") && !setupOpen) {
+        if (discord.rpc.unauthorized) list.push({ kind: "reauth" })
+        list.push({ kind: "setup" })
+      }
+    }
+    if (discord.hasWindow) {
+      list.push({ kind: "section", key: "windows" })
+      if (!isCollapsed("windows")) {
+        for (var i = 0; i < discord.windows.length; i++) list.push({ kind: "window", key: i })
+      }
+    } else {
+      // The window rows already focus Discord, so this row is only for when there is none, and it never folds.
+      list.push({ kind: "open" })
+    }
+    if (channelsVisible) {
+      list.push({ kind: "section", key: "channels" })
+      if (!isCollapsed("channels")) {
+        for (var c = 0; c < discord.favouriteRows.length; c++) list.push({ kind: "channel", key: c })
+        if (discord.voiceKnown) list.push({ kind: "addChannel" })
+      }
+    }
+    list.push({ kind: "section", key: "workspace" })
+    if (!isCollapsed("workspace")) {
+      list.push({ kind: "workspace" })
+      if (root.workspacePreset !== "") list.push({ kind: "follow" })
+    }
+    if (friendsVisible) {
+      list.push({ kind: "section", key: "friends" })
+      if (!isCollapsed("friends")) {
+        if (discord.friendsGrantable) list.push({ kind: "grant" })
+        for (var f = 0; f < discord.watchedRows.length; f++) list.push({ kind: "friend", key: f })
+        if (discord.watchableFriends.length > 0) list.push({ kind: "watch" })
+      }
     }
     return list
   }
 
   readonly property var currentRow: rowIndex >= 0 && rowIndex < navRows.length ? navRows[rowIndex] : null
 
-  function indexOfRow(kind, itemIndex) {
+  // A row with a key (window, friend, channel index, or section id) is matched on it; a bare kind matches alone.
+  function indexOfRow(kind, key) {
     for (var i = 0; i < navRows.length; i++) {
       var row = navRows[i]
       if (row.kind !== kind) continue
-      if ((kind === "window" || kind === "friend") && row.itemIndex !== itemIndex) continue
+      if (row.key !== undefined && row.key !== key) continue
       return i
     }
     return -1
@@ -186,17 +256,20 @@ Panel {
     if (!currentRow) return
     switch (currentRow.kind) {
     case "power": discord.running ? discord.quit() : discord.launch(); break
+    case "section": root.toggleSection(currentRow.key); break
     case "mic": discord.toggleMic(); break
     case "deafen": discord.toggleDeaf(); break
     case "hangup": discord.hangUp(); break
     case "volume": discord.toggleAppMute(); break
-    case "window": discord.focusWindow(discord.windows[currentRow.itemIndex]); root.close(); break
+    case "window": discord.focusWindow(discord.windows[currentRow.key]); root.close(); break
     case "open": if (discord.installed) { discord.open(); root.close() } break
     case "setup": root.openSetup(); break
     case "reauth": discord.rpc.reauthorize(); break
+    case "channel": discord.joinChannel(discord.favouriteRows[currentRow.key].id); break
+    case "addChannel": if (root.channelControl) root.channelControl.open(); break
     case "workspace": root.persist("workspace", Model.nextOption(root.workspaceOptions, root.workspacePreset)); break
     case "follow": root.persist("followWorkspace", !root.followWorkspace); break
-    case "friend": root.unwatchFriend(discord.watchedRows[currentRow.itemIndex].id); break
+    case "friend": root.unwatchFriend(discord.watchedRows[currentRow.key].id); break
     case "grant": discord.grantFriends(); break
     case "watch": if (root.watchControl) root.watchControl.open(); break
     }
@@ -222,6 +295,7 @@ Panel {
     workspacePreset: root.workspacePreset
     followWorkspace: root.followWorkspace
     watchedFriends: root.watchedFriends
+    favouriteChannels: root.favouriteChannels
   }
 
   // Shows audio actually reaching the call, not just that the mic is unmuted.
@@ -231,7 +305,7 @@ Panel {
     enabled: root.opened && discord.captureNode !== null
   }
 
-  // raise and mute are the two worth binding a key to.
+  // raise, mute and join are the ones worth binding a key to.
   IpcHandler {
     target: root.ipcTarget
 
@@ -260,6 +334,13 @@ Panel {
       if (!discord.voiceKnown) return "no voice bridge"
       discord.hangUp()
       return "ok"
+    }
+    // "omarchy-shell discord join general": a favourite by name, or the first one when the name is empty.
+    function join(name: string): string {
+      if (root.favouriteChannels.length === 0) return "no favourite channels"
+      var match = Model.matchFavourite(root.favouriteChannels, name)
+      if (!match) return "no favourite channel matches " + name
+      return discord.joinChannel(match.id)
     }
   }
 
@@ -346,7 +427,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, root.panelHeightCap)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -357,6 +438,7 @@ Panel {
         else root.moveCursor(dx, dy)
       }
       onActivateRequested: if (root.cursorActive) root.activateCursor()
+      onDeleteRequested: if (root.cursorActive) root.deleteCursor()
       onCloseRequested: root.close()
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onTextKey: function (t) {
@@ -367,6 +449,7 @@ Panel {
         else if (t === "r" || t === "R") discord.refresh()
       }
 
+      // Inert while everything fits; the safety net for a panel with every section open and a long watch list.
       Flickable {
         id: panelFlick
         anchors.fill: parent
@@ -458,44 +541,50 @@ Panel {
           }
 
           PanelSeparator {
-            visible: discord.inVoice || discord.hasPlayback
+            visible: root.voiceVisible
             foreground: root.foreground
           }
 
           Column {
-            visible: discord.inVoice || discord.hasPlayback
+            visible: root.voiceVisible
             width: parent.width
             spacing: Style.space(10)
 
-            PanelSectionHeader {
-              text: discord.inVoice ? "VOICE CALL" : "AUDIO"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
-            CallRow {
-              visible: root.callControls
-              width: parent.width
+            SectionHeader {
+              sectionId: "voice"
+              title: discord.inVoice ? "VOICE CALL" : "AUDIO"
+              summary: Model.voiceSummary(discord.inVoice, discord.callChannel, discord.callGuild, discord.appVolume)
             }
 
             Column {
+              visible: !root.isCollapsed("voice")
               width: parent.width
-              spacing: Style.space(6)
+              spacing: Style.space(10)
 
-              // Only the fallback now: with the bridge up the call row owns the mic.
-              MicRow {
-                visible: root.micRowVisible
-                width: parent.width
-              }
-
-              GainRow {
+              CallRow {
                 visible: root.callControls
                 width: parent.width
               }
 
-              VolumeRow {
-                visible: discord.hasPlayback
+              Column {
                 width: parent.width
+                spacing: Style.space(6)
+
+                // Only the fallback now: with the bridge up the call row owns the mic.
+                MicRow {
+                  visible: root.micRowVisible
+                  width: parent.width
+                }
+
+                GainRow {
+                  visible: root.callControls
+                  width: parent.width
+                }
+
+                VolumeRow {
+                  visible: discord.hasPlayback
+                  width: parent.width
+                }
               }
             }
           }
@@ -510,13 +599,13 @@ Panel {
             width: parent.width
             spacing: Style.space(10)
 
-            PanelSectionHeader {
-              text: "VOICE CONTROLS"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+            SectionHeader {
+              sectionId: "setup"
+              title: "VOICE CONTROLS"
             }
 
             Column {
+              visible: !root.isCollapsed("setup")
               width: parent.width
               spacing: Style.space(6)
 
@@ -537,7 +626,7 @@ Panel {
                 kind: "setup"
                 glyph: "󰒓"
                 label: discord.rpc.unauthorized ? "Enter a different application" : "Set up voice controls"
-                sub: "Channel name, deafen, hang up and friend notifications"
+                sub: "Channel name, deafen, hang up and joining channels"
                 onTriggered: root.openSetup()
               }
 
@@ -630,15 +719,17 @@ Panel {
             width: parent.width
             spacing: Style.space(10)
 
-            PanelSectionHeader {
+            SectionHeader {
               visible: discord.hasWindow
-              text: discord.windows.length > 1 ? "WINDOWS" : "WINDOW"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+              sectionId: "windows"
+              title: discord.windows.length > 1 ? "WINDOWS" : "WINDOW"
+              summary: Model.windowsSummary(discord.windows.length)
             }
 
+            // The start row lives here too and never folds, since a header is only drawn once a window exists.
             Column {
               id: actionColumn
+              visible: !discord.hasWindow || !root.isCollapsed("windows")
               width: parent.width
               spacing: Style.space(6)
 
@@ -667,6 +758,60 @@ Panel {
           }
 
           PanelSeparator {
+            visible: root.channelsVisible
+            foreground: root.foreground
+          }
+
+          Column {
+            visible: root.channelsVisible
+            width: parent.width
+            spacing: Style.space(10)
+
+            SectionHeader {
+              sectionId: "channels"
+              title: "CHANNELS"
+              summary: Model.channelsSummary(root.favouriteChannels)
+            }
+
+            Column {
+              id: channelColumn
+              visible: !root.isCollapsed("channels")
+              width: parent.width
+              spacing: Style.space(6)
+
+              Repeater {
+                model: discord.favouriteRows
+
+                ChannelRow {
+                  required property var modelData
+                  required property int index
+                  width: channelColumn.width
+                  row: modelData
+                  itemIndex: index
+                }
+              }
+
+              FavouriteRow {
+                visible: discord.voiceKnown
+                width: parent.width
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                visible: root.channelsHint !== ""
+                width: parent.width
+                leftPadding: Style.space(10)
+                rightPadding: Style.space(10)
+                text: root.channelsHint
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+            }
+          }
+
+          PanelSeparator {
             foreground: root.foreground
           }
 
@@ -674,24 +819,15 @@ Panel {
             width: parent.width
             spacing: Style.space(10)
 
-            PanelSectionHeader {
-              text: "WORKSPACE"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+            SectionHeader {
+              sectionId: "workspace"
+              title: "WORKSPACE"
+              summary: Model.workspaceSummary(root.workspacePreset, root.followWorkspace)
             }
 
-            Column {
+            WorkspaceRow {
+              visible: !root.isCollapsed("workspace")
               width: parent.width
-              spacing: Style.space(6)
-
-              WorkspaceRow {
-                width: parent.width
-              }
-
-              FollowRow {
-                visible: root.workspacePreset !== ""
-                width: parent.width
-              }
             }
           }
 
@@ -705,14 +841,15 @@ Panel {
             width: parent.width
             spacing: Style.space(10)
 
-            PanelSectionHeader {
-              text: "FRIENDS"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+            SectionHeader {
+              sectionId: "friends"
+              title: "FRIENDS"
+              summary: Model.friendsSummary(discord.watchedRows)
             }
 
             Column {
               id: friendColumn
+              visible: !root.isCollapsed("friends")
               width: parent.width
               spacing: Style.space(6)
 
@@ -1271,6 +1408,7 @@ Panel {
   component WorkspaceRow: CursorSurface {
     id: workspaceRow
     readonly property int navIndex: root.indexOfRow("workspace", -1)
+    readonly property int followIndex: root.indexOfRow("follow", -1)
 
     hasCursor: root.cursorActive && root.rowIndex === navIndex
     foreground: root.foreground
@@ -1329,21 +1467,25 @@ Panel {
         onHovered: function (on) { if (on) root.setCursor(workspaceRow.navIndex) }
         Layout.alignment: Qt.AlignVCenter
       }
+
+      // Its own cursor stop inside the row, the way the call buttons sit inside CallRow.
+      ToggleSwitch {
+        id: followSwitch
+        visible: root.workspacePreset !== ""
+        checked: root.followWorkspace
+        foreground: root.foreground
+        hasCursor: root.cursorActive && root.rowIndex === workspaceRow.followIndex
+        onHovered: function (on) { if (on) root.setCursor(workspaceRow.followIndex) }
+        onToggled: root.persist("followWorkspace", !root.followWorkspace)
+        Layout.alignment: Qt.AlignVCenter
+
+        PanelToolTip {
+          visible: followSwitch.containsMouse
+          text: root.followWorkspace ? "Switches to it" : "Moves it silently"
+          fontFamily: root.fontFamily
+        }
+      }
     }
-  }
-
-  component FollowRow: Toggle {
-    id: followRow
-    readonly property int navIndex: root.indexOfRow("follow", -1)
-
-    label: "Switch to it"
-    description: "Off moves Discord there without leaving your workspace"
-    foreground: root.foreground
-    fontFamily: root.fontFamily
-    checked: root.followWorkspace
-    hasCursor: root.cursorActive && root.rowIndex === navIndex
-    onClicked: root.persist("followWorkspace", !root.followWorkspace)
-    onHovered: function (on) { if (on) root.setCursor(followRow.navIndex) }
   }
 
   // A watched friend: presence dot, name and status; the switch stops watching.
@@ -1468,6 +1610,197 @@ Panel {
           watchPicker.value = ""
         }
         onHovered: function (on) { if (on) root.setCursor(watchRow.navIndex) }
+      }
+    }
+  }
+
+  // A header is a cursor stop whose ring sits on the chevron, the way first-party headers keep their control on the right.
+  component SectionHeader: Item {
+    id: sectionHeader
+    property string sectionId: ""
+    property string title: ""
+    property string summary: ""
+    readonly property bool collapsed: root.isCollapsed(sectionId)
+    readonly property int navIndex: root.indexOfRow("section", sectionId)
+    readonly property bool hasCursor: root.cursorActive && root.rowIndex === navIndex
+
+    width: parent.width
+    implicitHeight: Math.max(titleText.implicitHeight, chevron.implicitHeight)
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: root.setCursor(sectionHeader.navIndex)
+      onClicked: root.toggleSection(sectionHeader.sectionId)
+    }
+
+    PanelSectionHeader {
+      id: titleText
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      text: sectionHeader.title
+      foreground: root.foreground
+      fontFamily: root.fontFamily
+    }
+
+    // What the fold hides, in the caption the audio panel uses for its level.
+    Text {
+      textFormat: Text.PlainText
+      visible: sectionHeader.collapsed && sectionHeader.summary !== ""
+      anchors.left: titleText.right
+      anchors.right: chevron.left
+      anchors.leftMargin: Style.space(8)
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: titleText.verticalCenter
+      anchors.verticalCenterOffset: Math.round(titleText.topPadding / 2)
+      text: sectionHeader.summary
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      horizontalAlignment: Text.AlignRight
+      elide: Text.ElideRight
+    }
+
+    PanelActionButton {
+      id: chevron
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      iconText: sectionHeader.collapsed ? "󰅂" : "󰅀"
+      tooltipText: sectionHeader.collapsed ? "Show" : "Hide"
+      fontFamily: root.fontFamily
+      foreground: root.foreground
+      hasCursor: sectionHeader.hasCursor
+      onClicked: root.toggleSection(sectionHeader.sectionId)
+      onHovered: function (on) { if (on) root.setCursor(sectionHeader.navIndex) }
+    }
+  }
+
+  // A favourite voice channel: one press joins it, starting Discord first when it has to.
+  component ChannelRow: CursorSurface {
+    id: channelRow
+    property var row: null
+    property int itemIndex: 0
+    readonly property int navIndex: root.indexOfRow("channel", itemIndex)
+    readonly property bool failed: row !== null && discord.joinError !== "" && discord.joinErrorChannel === row.id
+
+    hasCursor: root.cursorActive && root.rowIndex === navIndex
+    current: row !== null && row.joined
+    foreground: root.foreground
+    implicitHeight: channelContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: root.setCursor(channelRow.navIndex)
+      onClicked: if (channelRow.row) discord.joinChannel(channelRow.row.id)
+    }
+
+    RowLayout {
+      id: channelContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+      spacing: Style.space(8)
+
+      Text {
+        textFormat: Text.PlainText
+        text: "󰋋"
+        color: channelRow.failed ? root.urgent : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.icon
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: channelRow.row ? Model.channelLabel(channelRow.row.name) : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: channelRow.row
+            ? Model.channelSub(channelRow.row.guild, channelRow.row.count, channelRow.row.joined, channelRow.row.joining,
+                               channelRow.failed ? discord.joinError : "")
+            : ""
+          color: channelRow.failed ? root.urgent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      // Network's forget idiom: a small urgent-on-hover button, and x on the row does the same.
+      PanelActionButton {
+        iconText: "󰅙"
+        tooltipText: "Remove"
+        hoverColor: root.urgent
+        fontFamily: root.fontFamily
+        foreground: root.foreground
+        onClicked: if (channelRow.row) root.unfavouriteChannel(channelRow.row.id)
+        Layout.alignment: Qt.AlignVCenter
+      }
+    }
+  }
+
+  // Picks a voice channel from every server the bridge lists; the value resets so the label stays an invitation.
+  component FavouriteRow: CursorSurface {
+    id: favouriteRow
+    readonly property int navIndex: root.indexOfRow("addChannel", -1)
+
+    hasCursor: root.cursorActive && root.rowIndex === navIndex
+    foreground: root.foreground
+    implicitHeight: favouriteContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      acceptedButtons: Qt.NoButton
+      onEntered: root.setCursor(favouriteRow.navIndex)
+    }
+
+    RowLayout {
+      id: favouriteContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+
+      SearchableDropdown {
+        id: channelPicker
+        Layout.fillWidth: true
+        showLabel: false
+        triggerLabel: "Add a channel"
+        placeholderText: "Search voice channels..."
+        emptyText: discord.channelsKnown ? "No such voice channel" : "Asking Discord for channels..."
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        options: discord.channelOptions
+        value: ""
+        hasCursor: favouriteRow.hasCursor
+        Component.onCompleted: root.channelControl = channelPicker
+        Component.onDestruction: if (root.channelControl === channelPicker) root.channelControl = null
+        // The 48 round trips happen the first time the list is wanted, not on every bridge start.
+        onPopupOpenChanged: if (popupOpen) discord.requestChannels()
+        onChanged: function (picked) {
+          root.favouriteChannel(picked)
+          channelPicker.value = ""
+        }
+        onHovered: function (on) { if (on) root.setCursor(favouriteRow.navIndex) }
       }
     }
   }

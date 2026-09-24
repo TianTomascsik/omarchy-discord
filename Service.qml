@@ -22,6 +22,8 @@ Item {
   property bool followWorkspace: false
   // Entries look like { id: "80351110224678912", name: "gm" }.
   property var watchedFriends: []
+  // Entries look like { id: "1", name: "General", guildId: "10", guild: "GM's Server" }.
+  property var favouriteChannels: []
 
   // ------------------------------------------------------------ installed
 
@@ -78,6 +80,7 @@ Item {
   readonly property bool voiceKnown: bridge.connected
   readonly property string callChannel: bridge.channel
   readonly property string callGuild: bridge.guild
+  readonly property string callChannelId: bridge.channelId
 
   // Without the bridge the capture stream is all there is, and Discord drops it while muted.
   readonly property bool hasMicControl: voiceKnown || captureNode !== null
@@ -176,12 +179,123 @@ Item {
       "--exec", "omarchy-shell", "discord", "raise"])
   }
 
+  // ------------------------------------------------------------ channels
+
+  readonly property bool channelsKnown: bridge.channelGuilds.length > 0
+  readonly property var channelOptions: Model.channelOptions(bridge.channelGuilds, favouriteChannels)
+  readonly property var favouriteRows: Model.favouriteRows(favouriteChannels, bridge.channelCounts, callChannelId, pendingJoin)
+
+  // Asked once per bridge session, when the picker opens; 48 round trips are not worth doing unasked.
+  function requestChannels() {
+    if (voiceKnown && !channelsKnown) bridge.listChannels()
+  }
+
+  // A newly saved favourite gets its occupancy without waiting for the next poll.
+  onFavouriteChannelsChanged: refresh()
+
+  // ------------------------------------------------------------ join
+
+  // The favourite being joined, "" when none; the hero says why Discord is starting.
+  property string pendingJoin: ""
+  readonly property bool joining: pendingJoin !== ""
+  readonly property string pendingJoinName: Model.favouriteName(favouriteChannels, pendingJoin)
+  property string joinError: ""
+  property string joinErrorChannel: ""
+  property int joinAttempts: 0
+  // A cold client answers the first join late or with 4005, so it gets a settle and one retry inside a minute.
+  readonly property int joinSettleMs: 3000
+  readonly property int joinRetryMs: 5000
+  readonly property int joinDeadlineMs: 60000
+  readonly property int joinMaxAttempts: 2
+
+  // Returns "ok" or the reason, so the IPC verb and the row share one path.
+  function joinChannel(id) {
+    var channelId = String(id || "")
+    if (channelId === "") return "no such channel"
+    if (channelId === callChannelId) return "ok"
+    joinError = ""
+    joinErrorChannel = ""
+    joinAttempts = 0
+    if (running && !bridge.configured) {
+      joinError = "Voice controls are needed to join"
+      joinErrorChannel = channelId
+      return joinError
+    }
+    pendingJoin = channelId
+    joinDeadline.restart()
+    if (voiceKnown) {
+      sendJoin()
+    } else if (!running) {
+      launch()
+    } else {
+      bridge.retry()
+    }
+    return "ok"
+  }
+
+  function sendJoin() {
+    if (pendingJoin === "") return
+    joinAttempts += 1
+    console.log("omarchy-discord join: " + pendingJoinName + " attempt " + joinAttempts)
+    bridge.join(pendingJoin)
+  }
+
+  function failJoin(reason) {
+    joinError = reason
+    joinErrorChannel = pendingJoin
+    pendingJoin = ""
+    joinDeadline.stop()
+    joinRetry.stop()
+    console.log("omarchy-discord join failed: " + reason)
+  }
+
+  // A bridge that comes up while a join waits gets the join after the voice engine has had a moment.
+  onVoiceKnownChanged: if (voiceKnown && pendingJoin !== "") joinSettle.restart()
+  onCallChannelIdChanged: if (pendingJoin !== "" && callChannelId === pendingJoin) {
+    console.log("omarchy-discord join: landed in " + pendingJoinName)
+    pendingJoin = ""
+    joinDeadline.stop()
+    joinRetry.stop()
+  }
+
+  Connections {
+    target: bridge
+    function onJoinErrorChanged() {
+      var error = bridge.joinError
+      if (root.pendingJoin === "" || !error || String(error.channelId || "") !== root.pendingJoin) return
+      console.log("omarchy-discord join: Discord answered " + error.code + " " + error.message)
+      if (Model.joinRetryable(error.code) && root.joinAttempts < root.joinMaxAttempts) {
+        joinRetry.restart()
+        return
+      }
+      root.failJoin(Model.joinFailure(error.code, error.message))
+    }
+  }
+
+  Timer {
+    id: joinSettle
+    interval: root.joinSettleMs
+    onTriggered: root.sendJoin()
+  }
+
+  Timer {
+    id: joinRetry
+    interval: root.joinRetryMs
+    onTriggered: root.sendJoin()
+  }
+
+  Timer {
+    id: joinDeadline
+    interval: root.joinDeadlineMs
+    onTriggered: if (root.pendingJoin !== "") root.failJoin("Discord did not join " + root.pendingJoinName + " within a minute")
+  }
+
   // ------------------------------------------------------------ actions
 
   // Re-reads both tiers in case a dispatch was missed; the bridge ignores this while down.
   function refresh() {
     if (!statusProcess.running) statusProcess.running = true
-    bridge.refresh()
+    bridge.refresh(Model.favouriteIds(favouriteChannels))
     clockMs = Date.now()
   }
 

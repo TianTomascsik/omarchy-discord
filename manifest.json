@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.thisisgm.discord",
   "name": "Discord",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "GM",
   "license": "MIT",
-  "description": "Discord in the Omarchy bar: attention badge, call state, volume, window focus, memory footprint, a workspace preset and friend online notifications.",
+  "description": "Discord in the Omarchy bar: attention badge, call state, volume, window focus, memory footprint, a workspace preset, favourite voice channels you join in one press, and friend online notifications.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Discord",
-    "description": "Raise or launch Discord on a chosen workspace, see and control the voice call, watch what it costs in memory, and get told when a watched friend comes online.",
+    "description": "Raise or launch Discord on a chosen workspace, join a favourite voice channel in one press, see and control the voice call, watch what it costs in memory, and get told when a watched friend comes online.",
     "category": "Social",
     "allowMultiple": false,
     "defaultSection": "right",
@@ -22,7 +22,12 @@
       "hideWhenStopped": false,
       "workspace": "",
       "followWorkspace": false,
-      "watchedFriends": []
+      "watchedFriends": [],
+      "favouriteChannels": [],
+      "collapsed": [
+        "workspace",
+        "friends"
+      ]
     },
     "schema": [
       {
@@ -48,6 +53,21 @@
         "type": "array",
         "label": "Friends to notify about when they come online",
         "defaultValue": []
+      },
+      {
+        "key": "favouriteChannels",
+        "type": "array",
+        "label": "Voice channels to join from the panel",
+        "defaultValue": []
+      },
+      {
+        "key": "collapsed",
+        "type": "array",
+        "label": "Panel sections that start folded",
+        "defaultValue": [
+          "workspace",
+          "friends"
+        ]
       }
     ]
   },

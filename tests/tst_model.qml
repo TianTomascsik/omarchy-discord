@@ -282,12 +282,142 @@ TestCase {
     verify(!Model.friendsFileFresh(0, 5000))
   }
 
-  function test_watchedList_accepts_the_bare_object_the_cli_stores() {
-    compare(Model.watchedList([{ id: "1" }]).length, 1)
-    compare(Model.watchedList({ id: "1", name: "amy" }).length, 1)
-    compare(Model.watchedList({ name: "no id" }).length, 0)
-    compare(Model.watchedList(null).length, 0)
-    compare(Model.watchedList("x").length, 0)
+  function test_entryList_accepts_the_bare_object_the_cli_stores() {
+    compare(Model.entryList([{ id: "1" }]).length, 1)
+    compare(Model.entryList({ id: "1", name: "amy" }).length, 1)
+    compare(Model.entryList({ name: "no id" }).length, 0)
+    compare(Model.entryList(null).length, 0)
+    compare(Model.entryList("x").length, 0)
+  }
+
+  // ---------------------------------------------------------------- sections
+
+  function test_collapsedList_defaults_filters_and_accepts_a_bare_string() {
+    compare(Model.collapsedList(null), ["workspace", "friends"])
+    compare(Model.collapsedList(undefined), ["workspace", "friends"])
+    compare(Model.collapsedList([]), [])
+    compare(Model.collapsedList("friends"), ["friends"])
+    compare(Model.collapsedList(["bogus", "voice", "voice"]), ["voice"])
+  }
+
+  function test_toggleCollapsed_adds_removes_and_never_duplicates() {
+    var once = Model.toggleCollapsed([], "voice")
+    compare(once, ["voice"])
+    compare(Model.toggleCollapsed(once, "voice"), [])
+    compare(Model.toggleCollapsed(["voice"], "friends"), ["voice", "friends"])
+    verify(Model.isCollapsed(["voice"], "voice"))
+    verify(!Model.isCollapsed(["voice"], "friends"))
+  }
+
+  function test_summaries_say_what_a_folded_header_hides() {
+    compare(Model.workspaceSummary("", false), "anywhere")
+    compare(Model.workspaceSummary("3", false), "3 · silent")
+    compare(Model.workspaceSummary("3", true), "3 · switches")
+    compare(Model.friendsSummary([]), "")
+    compare(Model.friendsSummary([{ status: "offline" }, { status: "unknown" }]), "2 watched")
+    compare(Model.friendsSummary([{ status: "online" }, { status: "offline" }]), "1 online")
+    compare(Model.channelsSummary([]), "")
+    compare(Model.channelsSummary([{ id: "1", name: "general" }]), "#general")
+    compare(Model.channelsSummary([{ id: "1", name: "general" }, { id: "2", name: "afk" }]), "#general +1")
+    compare(Model.channelLabel("#Tamecap"), "#Tamecap")
+    compare(Model.channelLabel("general"), "#general")
+    compare(Model.channelsSummary([{ id: "1", name: "#Tamecap" }]), "#Tamecap")
+    compare(Model.voiceSummary(true, "General", "GM's Server", 0.5), "General · GM's Server")
+    compare(Model.voiceSummary(true, "", "", 0.5), "In a call")
+    compare(Model.voiceSummary(false, "", "", 0.45), "45%")
+    compare(Model.windowsSummary(0), "")
+    compare(Model.windowsSummary(1), "1 window")
+    compare(Model.windowsSummary(2), "2 windows")
+  }
+
+  // ---------------------------------------------------------------- channels
+
+  readonly property var guildList: [
+    { id: "10", name: "GM's Server", channels: [{ id: "1", name: "General" }, { id: "2", name: "AFK" }] },
+    { id: "20", name: "Other", channels: [{ id: "3", name: "General" }] }
+  ]
+
+  function test_addFavourite_stores_strings_and_dedupes() {
+    var one = Model.addFavourite([], { id: 1, name: "General", guildId: 10, guild: "GM's Server" })
+    compare(one.length, 1)
+    compare(one[0].id, "1")
+    compare(one[0].guildId, "10")
+    compare(Model.addFavourite(one, { id: "1", name: "again" }).length, 1)
+    compare(Model.addFavourite(one, null).length, 1)
+    compare(Model.addFavourite(one, { id: "" }).length, 1)
+    compare(Model.favouriteIds(Model.addFavourite(one, { id: "2", name: "AFK" })), ["1", "2"])
+    compare(Model.removeEntry(one, "1").length, 0)
+  }
+
+  function test_channelOptions_keep_discords_order_and_skip_favourites() {
+    var options = Model.channelOptions(guildList, [{ id: "2", name: "AFK" }])
+    compare(options.length, 2)
+    compare(options[0].value, "1")
+    compare(options[0].label, "#General")
+    compare(options[0].description, "GM's Server")
+    compare(options[1].description, "Other")
+    compare(Model.channelOptions([], []).length, 0)
+  }
+
+  function test_findChannel_returns_the_favourite_shape() {
+    var found = Model.findChannel(guildList, "3")
+    compare(found.name, "General")
+    compare(found.guild, "Other")
+    compare(found.guildId, "20")
+    compare(Model.findChannel(guildList, "9"), null)
+  }
+
+  function test_favouriteRows_mark_joined_and_joining_by_id() {
+    var favourites = [{ id: "1", name: "General", guild: "GM's Server" }, { id: "2", name: "AFK", guild: "GM's Server" }]
+    var rows = Model.favouriteRows(favourites, { "1": 3 }, "1", "2")
+    verify(rows[0].joined)
+    verify(!rows[0].joining)
+    compare(rows[0].count, 3)
+    verify(rows[1].joining)
+    compare(rows[1].count, -1)
+    verify(!Model.favouriteRows(favourites, {}, "", "")[0].joined)
+  }
+
+  function test_channelSub_covers_every_branch() {
+    compare(Model.channelSub("Srv", 3, false, true, ""), "Joining...")
+    compare(Model.channelSub("Srv", 3, false, false, "No permission to join"), "No permission to join")
+    compare(Model.channelSub("Srv", 3, true, false, ""), "Srv · connected")
+    compare(Model.channelSub("Srv", 3, false, false, ""), "Srv · 3 in call")
+    compare(Model.channelSub("Srv", 0, false, false, ""), "Srv · empty")
+    compare(Model.channelSub("Srv", -1, false, false, ""), "Srv")
+    compare(Model.channelSub("", -1, false, false, ""), "")
+  }
+
+  function test_matchFavourite_prefers_exact_then_substring() {
+    var favourites = [{ id: "1", name: "General" }, { id: "2", name: "gen-afk" }]
+    compare(Model.matchFavourite(favourites, "").id, "1")
+    compare(Model.matchFavourite(favourites, "#GENERAL").id, "1")
+    compare(Model.matchFavourite(favourites, "afk").id, "2")
+    compare(Model.matchFavourite(favourites, "zzz"), null)
+    compare(Model.matchFavourite([], "general"), null)
+    compare(Model.favouriteName(favourites, "2"), "#gen-afk")
+    compare(Model.favouriteName(favourites, "9"), "9")
+  }
+
+  function test_joinFailure_names_the_documented_codes() {
+    compare(Model.joinFailure(4005, ""), "Discord does not know that channel any more")
+    compare(Model.joinFailure(4006, ""), "No permission to join")
+    compare(Model.joinFailure(5001, ""), "Discord timed out joining")
+    compare(Model.joinFailure(5003, ""), "Discord refused to move you")
+    compare(Model.joinFailure(1001, "Service unavailable"), "Service unavailable")
+    verify(Model.joinRetryable(4005))
+    verify(Model.joinRetryable(5001))
+    verify(!Model.joinRetryable(4006))
+  }
+
+  function test_statusPhrase_names_a_pending_join_even_before_discord_runs() {
+    var base = { installed: true, running: false, joining: true, pendingJoinName: "#general" }
+    compare(Model.statusPhrase(base), "Starting Discord to join #general")
+    base.running = true
+    compare(Model.statusPhrase(base), "Joining #general")
+    base.joining = false
+    base.attention = false; base.inVoice = false; base.hasWindow = false
+    compare(Model.statusPhrase(base), "Running in the background")
   }
 
   function test_addWatched_and_removeWatched_keep_the_list_deduplicated() {
@@ -296,7 +426,7 @@ TestCase {
     compare(same.length, 1)
     compare(same[0].name, "amy")
     compare(Model.addWatched(one, "", "nobody").length, 1)
-    compare(Model.removeWatched(same, "1").length, 0)
-    compare(Model.removeWatched(same, "7").length, 1)
+    compare(Model.removeEntry(same, "1").length, 0)
+    compare(Model.removeEntry(same, "7").length, 1)
   }
 }
