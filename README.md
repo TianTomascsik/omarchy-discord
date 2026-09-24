@@ -268,14 +268,15 @@ application**. The refusal you are most likely to meet is
 redirect saved on its OAuth2 page yet; add `http://localhost/omarchy-discord`
 there, click **Save Changes**, and try again.
 
-Friend presence rides a fourth scope, `relationships.read`, and Discord's
-portal does not list it for an ordinary application. So it is asked for
-separately, from the **Enable friend presence** row in the Friends section
-or as the second step of `--setup`, and a refusal there costs nothing: the
-voice tier keeps working, the row offers to ask again, and Discord's reason
-is shown. Whether Discord grants that scope to an application's owner is not
-settled; if yours refuses it, the Friends section will say exactly what
-Discord answered.
+Friend presence rides a fourth scope, `relationships.read`, which Discord
+grants only to applications it has approved for it. Measured on an ordinary
+application with everything else in order, the answer is
+`invalid_scope: The requested scope is invalid, unknown, or malformed`, with
+no consent modal and no exception for the application's owner. The
+**Enable friend presence** row in the Friends section still asks, because an
+approved application would succeed, and a refusal costs nothing: the voice
+tier keeps working and Discord's reason is shown. For a personal application,
+expect the refusal.
 
 If you are not the application's owner, your account has to be on its **App
 Testers** list; the owner is already covered.

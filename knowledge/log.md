@@ -6,6 +6,13 @@ description: What changed in this bundle and when
 
 # Log
 
+## 2026-09-24, later still
+
+The friend scope was asked for on its own socket, after the voice tier was
+working, and Discord refused it as `invalid_scope`. `discord-rpc-relationships`
+moves to stable with that answer: the local RPC socket cannot provide friend
+presence to an application Discord has not approved for it.
+
 ## 2026-09-24, later
 
 The first real setup on a fresh application produced the refusal recorded

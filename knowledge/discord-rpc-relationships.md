@@ -3,9 +3,9 @@ type: reference
 title: Friend presence over Discord's local RPC socket
 description: GET_RELATIONSHIPS and RELATIONSHIP_UPDATE carry the friend list and its presence, behind the relationships.read scope, which Discord gates the same way as rpc
 tags: [discord, rpc, oauth, presence]
-status: draft
+status: stable
 verified:
-  - by: Discord's OAuth2 documentation and the community RPC reference; the live socket has not yet been exercised with the scope granted
+  - by: a live AUTHORIZE on the local socket from an ordinary, unapproved application with the redirect registered, Omarchy 4.0.2, discord app-1.0.158
     at: 2026-09-24
 ---
 
@@ -58,9 +58,22 @@ The developer portal's OAuth2 URL generator, checked on 2026-09-24, offers
 the other rpc scopes, but not `relationships.read`. That is why the friend
 scope is requested on its own, after the voice tier is already working.
 
-# What is still open
+# Measured: the scope is refused for an ordinary application
 
-Whether `AUTHORIZE` with `relationships.read` is accepted for an unapproved
-application's owner, and whether `RELATIONSHIP_UPDATE` fires for every presence
-transition or only for some, both need a live session with the scope granted.
-When that is measured, this file moves to `status: stable`.
+With the redirect registered, the voice scopes granted and a fresh socket,
+`AUTHORIZE` with `relationships.read` added answers:
+
+```
+OAuth2 Error: invalid_scope: The requested scope is invalid, unknown, or malformed.
+```
+
+Discord does not show a consent modal for it and the owner of the
+application gets no exception. So unlike `rpc`, which an unapproved
+application's owner can grant to themselves, the friend scope needs the
+application to be approved for it first, and for a personal plugin that route
+is closed. The bridge keeps the request, since an approved application would
+succeed, but the Friends section has to say plainly that an ordinary one will
+not.
+
+Whether `RELATIONSHIP_UPDATE` fires for every presence transition therefore
+remains unmeasured, and cannot be measured without an approved application.

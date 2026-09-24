@@ -725,7 +725,7 @@ Panel {
                 kind: "grant"
                 glyph: "󰂚"
                 label: discord.friendsScope === "refused" ? "Ask Discord again for friend presence" : "Enable friend presence"
-                sub: "One more consent prompt, for the relationships.read scope"
+                sub: "Needs the relationships.read scope, which Discord grants to approved applications only"
                 onTriggered: discord.grantFriends()
               }
 
