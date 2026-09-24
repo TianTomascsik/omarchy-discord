@@ -24,6 +24,12 @@ Item {
   property bool joinInBackground: true
   // Entries look like { id: "80351110224678912", name: "gm" }.
   property var watchedFriends: []
+  // How an arrival is announced: the shell's popup, a sound, or both; "" picks the freedesktop message sound.
+  property bool notifyPopup: true
+  property bool notifySound: true
+  property string notifySoundFile: ""
+  readonly property string defaultSoundFile: "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga"
+  readonly property string soundFile: notifySoundFile !== "" ? notifySoundFile : defaultSoundFile
   // Entries look like { id: "1", name: "General", guildId: "10", guild: "GM's Server" }.
   property var favouriteChannels: []
 
@@ -173,12 +179,20 @@ Item {
     }
   }
 
-  // The shell's own notification server; clicking the toast raises Discord.
+  // The shell's own notification server plays nothing, so the sound is a separate PipeWire play; the toast raises Discord.
   function notifyOnline(friend) {
     console.log("omarchy-discord notify: " + friend.name + " is " + friend.status)
-    Util.execArgv(["omarchy-notification-send", "--app-name", "Discord", "-g", "󰂚", "-u", "normal",
-      String(friend.name) + " is online", Model.presenceLabel(friend.status) + " on Discord",
-      "--exec", "omarchy-shell", "discord", "raise"])
+    if (notifyPopup) {
+      Util.execArgv(["omarchy-notification-send", "--app-name", "Discord", "-g", "󰂚", "-u", "normal",
+        String(friend.name) + " is online", Model.presenceLabel(friend.status) + " on Discord",
+        "--exec", "omarchy-shell", "discord", "raise"])
+    }
+    if (notifySound) Util.execArgv(["pw-play", soundFile])
+  }
+
+  // The panel's test row and the IPC verb, so the popup and the sound can be checked without waiting for a friend.
+  function notifyTest() {
+    notifyOnline({ id: "test", name: "A watched friend", status: "online" })
   }
 
   // ------------------------------------------------------------ channels

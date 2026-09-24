@@ -134,6 +134,7 @@ omarchy-shell discord mute     # toggle the call microphone
 omarchy-shell discord deafen   # toggle deafen (needs the bridge, below)
 omarchy-shell discord hangup   # leave the call (needs the bridge, below)
 omarchy-shell discord join general   # join the favourite channel named general (needs the bridge)
+omarchy-shell discord notifytest     # the friend popup and sound, to check them
 omarchy-shell discord toggle   # the panel
 ```
 
@@ -235,6 +236,13 @@ nobody is announced for merely already being online; a friend added to the
 list while online is not an arrival; and one friend cannot fire more than
 once a minute.
 
+An arrival is a popup and a sound, each with its own switch in the Friends
+section. Omarchy's notification server plays nothing itself, so the sound is
+the plugin's: the freedesktop "message-new-instant" sound through PipeWire
+(`pw-play`), or any file you name in the `notifySoundFile` setting.
+**Send a test notification** fires both so you can check the volume, as does
+`omarchy-shell discord notifytest`.
+
 Presence uses the theme like the rest of the panel: foreground for online,
 dim for idle, the urgent color for do not disturb, faint for offline. Friends
 who are invisible read as offline, which is what Discord shows everyone else
@@ -242,7 +250,7 @@ too.
 
 ## Settings
 
-Seven, in Setup > Plugins or with `omarchy bar set`:
+Ten, in Setup > Plugins or with `omarchy bar set`:
 
 | Key | Type | Does |
 |---|---|---|
@@ -253,6 +261,9 @@ Seven, in Setup > Plugins or with `omarchy bar set`:
 | `watchedFriends` | array of `{id, name}` | friends to announce; edited from the panel |
 | `favouriteChannels` | array of `{id, name, guildId, guild}` | voice channels with a join row; edited from the panel |
 | `collapsed` | array of section ids | headers that start folded: `voice`, `setup`, `windows`, `channels`, `workspace`, `friends` |
+| `notifyPopup` | boolean | show the shell's popup when a watched friend comes online |
+| `notifySound` | boolean | play a sound as well |
+| `notifySoundFile` | path | the sound to play; empty means `/usr/share/sounds/freedesktop/stereo/message-new-instant.oga` |
 
 ## Limits worth knowing
 

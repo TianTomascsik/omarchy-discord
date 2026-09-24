@@ -24,6 +24,9 @@ Panel {
   readonly property string workspacePreset: String(setting("workspace", ""))
   readonly property bool followWorkspace: setting("followWorkspace", false) === true
   readonly property bool joinInBackground: setting("joinInBackground", true) === true
+  readonly property bool notifyPopup: setting("notifyPopup", true) === true
+  readonly property bool notifySound: setting("notifySound", true) === true
+  readonly property string notifySoundFile: String(setting("notifySoundFile", ""))
   readonly property var watchedFriends: Model.entryList(settings ? settings.watchedFriends : null)
   readonly property var favouriteChannels: Model.entryList(settings ? settings.favouriteChannels : null)
   // Folded headers, remembered in shell.json; null means the defaults have never been touched.
@@ -216,6 +219,9 @@ Panel {
         if (discord.friendsGrantable) list.push({ kind: "grant" })
         for (var f = 0; f < discord.watchedRows.length; f++) list.push({ kind: "friend", key: f })
         if (discord.watchableFriends.length > 0) list.push({ kind: "watch" })
+        list.push({ kind: "notifyPopup" })
+        list.push({ kind: "notifySound" })
+        list.push({ kind: "notifyTest" })
       }
     }
     return list
@@ -272,6 +278,9 @@ Panel {
     case "workspace": root.persist("workspace", Model.nextOption(root.workspaceOptions, root.workspacePreset)); break
     case "follow": root.persist("followWorkspace", !root.followWorkspace); break
     case "joinBackground": root.persist("joinInBackground", !root.joinInBackground); break
+    case "notifyPopup": root.persist("notifyPopup", !root.notifyPopup); break
+    case "notifySound": root.persist("notifySound", !root.notifySound); break
+    case "notifyTest": discord.notifyTest(); break
     case "friend": root.unwatchFriend(discord.watchedRows[currentRow.key].id); break
     case "grant": discord.grantFriends(); break
     case "watch": if (root.watchControl) root.watchControl.open(); break
@@ -299,6 +308,9 @@ Panel {
     followWorkspace: root.followWorkspace
     joinInBackground: root.joinInBackground
     watchedFriends: root.watchedFriends
+    notifyPopup: root.notifyPopup
+    notifySound: root.notifySound
+    notifySoundFile: root.notifySoundFile
     favouriteChannels: root.favouriteChannels
   }
 
@@ -337,6 +349,11 @@ Panel {
     function hangup(): string {
       if (!discord.voiceKnown) return "no voice bridge"
       discord.hangUp()
+      return "ok"
+    }
+    // Fires the same popup and sound an arrival would, for checking a sound file or a volume.
+    function notifytest(): string {
+      discord.notifyTest()
       return "ok"
     }
     // "omarchy-shell discord join general": a favourite by name, or the first one when the name is empty.
@@ -839,9 +856,15 @@ Panel {
               }
 
               // Only meaningful while launches switch; a silent preset already keeps you where you are.
-              JoinBackgroundRow {
+              SettingRow {
                 visible: root.workspacePreset !== "" && root.followWorkspace
                 width: parent.width
+                kind: "joinBackground"
+                glyph: "󰋋"
+                label: "Joining a channel"
+                sub: root.joinInBackground ? "Starts Discord in the background" : "Switches to Discord like any launch"
+                checked: root.joinInBackground
+                onToggled: root.persist("joinInBackground", !root.joinInBackground)
               }
             }
           }
@@ -893,6 +916,35 @@ Panel {
               WatchRow {
                 visible: discord.watchableFriends.length > 0
                 width: parent.width
+              }
+
+              SettingRow {
+                width: parent.width
+                kind: "notifyPopup"
+                glyph: "󰂚"
+                label: "Popup when a watched friend comes online"
+                sub: root.notifyPopup ? "Shown by the shell, click raises Discord" : "Off"
+                checked: root.notifyPopup
+                onToggled: root.persist("notifyPopup", !root.notifyPopup)
+              }
+
+              SettingRow {
+                width: parent.width
+                kind: "notifySound"
+                glyph: "󰕾"
+                label: "Play a sound"
+                sub: root.notifySound ? (root.notifySoundFile !== "" ? root.notifySoundFile : "The freedesktop message sound") : "Off"
+                checked: root.notifySound
+                onToggled: root.persist("notifySound", !root.notifySound)
+              }
+
+              ActionRow {
+                width: parent.width
+                kind: "notifyTest"
+                glyph: "󰑐"
+                label: "Send a test notification"
+                sub: "The popup and the sound an arrival would make"
+                onTriggered: discord.notifyTest()
               }
 
               Text {
@@ -1503,25 +1555,32 @@ Panel {
     }
   }
 
-  // The one exception to "Switch to it": a launch that a channel join caused stays in the background.
-  component JoinBackgroundRow: CursorSurface {
-    id: joinBackgroundRow
-    readonly property int navIndex: root.indexOfRow("joinBackground", -1)
+  // A boolean setting as a row: glyph, label, what the current value means, and an inline switch.
+  component SettingRow: CursorSurface {
+    id: settingRow
+    property string kind: ""
+    property string glyph: ""
+    property string label: ""
+    property string sub: ""
+    property bool checked: false
+    readonly property int navIndex: root.indexOfRow(kind, -1)
+
+    signal toggled()
 
     hasCursor: root.cursorActive && root.rowIndex === navIndex
     foreground: root.foreground
-    implicitHeight: joinBackgroundContent.implicitHeight + Style.spacing.rowPaddingX
+    implicitHeight: settingContent.implicitHeight + Style.spacing.rowPaddingX
 
     MouseArea {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onEntered: root.setCursor(joinBackgroundRow.navIndex)
-      onClicked: root.persist("joinInBackground", !root.joinInBackground)
+      onEntered: root.setCursor(settingRow.navIndex)
+      onClicked: settingRow.toggled()
     }
 
     RowLayout {
-      id: joinBackgroundContent
+      id: settingContent
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
@@ -1531,7 +1590,7 @@ Panel {
 
       Text {
         textFormat: Text.PlainText
-        text: "󰋋"
+        text: settingRow.glyph
         color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.icon
@@ -1545,7 +1604,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           Layout.fillWidth: true
-          text: "Joining a channel"
+          text: settingRow.label
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -1555,7 +1614,8 @@ Panel {
         Text {
           textFormat: Text.PlainText
           Layout.fillWidth: true
-          text: root.joinInBackground ? "Starts Discord in the background" : "Switches to Discord like any launch"
+          visible: settingRow.sub !== ""
+          text: settingRow.sub
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -1564,19 +1624,12 @@ Panel {
       }
 
       ToggleSwitch {
-        id: joinBackgroundSwitch
-        checked: root.joinInBackground
+        checked: settingRow.checked
         foreground: root.foreground
-        hasCursor: joinBackgroundRow.hasCursor
-        onToggled: root.persist("joinInBackground", !root.joinInBackground)
-        onHovered: function (on) { if (on) root.setCursor(joinBackgroundRow.navIndex) }
+        hasCursor: settingRow.hasCursor
+        onToggled: settingRow.toggled()
+        onHovered: function (on) { if (on) root.setCursor(settingRow.navIndex) }
         Layout.alignment: Qt.AlignVCenter
-
-        PanelToolTip {
-          visible: joinBackgroundSwitch.containsMouse
-          text: root.joinInBackground ? "Stays where you are" : "Follows Discord"
-          fontFamily: root.fontFamily
-        }
       }
     }
   }
