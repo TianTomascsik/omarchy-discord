@@ -28,3 +28,4 @@ records what changed and when.
 | [hyprland-dispatch-from-quickshell](hyprland-dispatch-from-quickshell.md) | the Lua dispatch wrapper, and the 0x that Quickshell drops from every window address |
 | [discord-rpc-relationships](discord-rpc-relationships.md) | the RPC route to friend presence, and the refusal that closes it for ordinary applications |
 | [betterdiscord-presence-file](betterdiscord-presence-file.md) | the route that works: a BetterDiscord plugin writing a private file the widget watches |
+| [discord-rpc-voice-channels](discord-rpc-voice-channels.md) | listing voice channels and joining one, and what a cold client needs |

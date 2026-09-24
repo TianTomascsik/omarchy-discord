@@ -115,6 +115,14 @@ voice call. The dot is urgent-colored whenever the call cannot hear you.
 | Scroll | Discord's volume |
 | `o` / `m` / `d` / `r` | raise / mute mic / deafen / refresh |
 | `j` `k`, `Enter` | move and activate; `h` `l` set volume on the volume row |
+| `Enter` on a section header | fold or unfold it; the fold is remembered |
+| `x` on a channel or friend row | remove it from the favourites or the watch list |
+
+Every section folds. A folded header keeps its one-line summary on the right,
+"3 · silent" for the workspace, "2 online" for friends, the call's name for
+voice, so nothing important disappears with the rows. Workspace and Friends
+start folded; the call, the windows and the channels start open, since those
+are what the panel is opened for.
 
 ### Keybindings
 
@@ -125,8 +133,14 @@ omarchy-shell discord raise    # focus the window, or start Discord
 omarchy-shell discord mute     # toggle the call microphone
 omarchy-shell discord deafen   # toggle deafen (needs the bridge, below)
 omarchy-shell discord hangup   # leave the call (needs the bridge, below)
+omarchy-shell discord join general   # join the favourite channel named general (needs the bridge)
 omarchy-shell discord toggle   # the panel
 ```
+
+`join` takes a favourite's name, case-insensitively and with or without the
+`#`; an empty name means the first favourite. It answers `ok` or says why not:
+`no favourite channels`, `no favourite channel matches x`, `Voice controls are
+needed to join`.
 
 `mute` is the interesting one: it works from any workspace without focusing
 Discord. Without the optional bridge it mutes Discord's microphone at the
@@ -161,6 +175,20 @@ omarchy bar set io.github.thisisgm.discord workspace 3
 omarchy bar set io.github.thisisgm.discord followWorkspace true --json
 omarchy bar set io.github.thisisgm.discord workspace '""' --json   # back to "anywhere"
 ```
+
+## Favourite voice channels, joined in one press
+
+With the optional RPC tier below set up, the panel gains a **Channels**
+section. **Add a channel** searches every voice channel of every server you
+are in, and each pick becomes a row: press it and you are in that call. If
+you are already in a call, Discord moves you. If Discord is not running, the
+same press starts it, lands it on your workspace preset, waits for its voice
+engine and then joins; the hero reads "Starting Discord to join #general"
+meanwhile, and gives up with a reason after a minute. Each row shows the
+server and, once the bridge has looked, how many people are in the channel.
+
+Joining goes through Discord's own `SELECT_VOICE_CHANNEL`, so it needs the
+bridge; the rows still show without it, and pressing one says so.
 
 ## Friend notifications
 
@@ -208,7 +236,7 @@ too.
 
 ## Settings
 
-Four, in Setup > Plugins or with `omarchy bar set`:
+Six, in Setup > Plugins or with `omarchy bar set`:
 
 | Key | Type | Does |
 |---|---|---|
@@ -216,6 +244,8 @@ Four, in Setup > Plugins or with `omarchy bar set`:
 | `workspace` | string | workspace id or name Discord opens on; `""` leaves it alone |
 | `followWorkspace` | boolean | switch to that workspace instead of moving silently |
 | `watchedFriends` | array of `{id, name}` | friends to announce; edited from the panel |
+| `favouriteChannels` | array of `{id, name, guildId, guild}` | voice channels with a join row; edited from the panel |
+| `collapsed` | array of section ids | headers that start folded: `voice`, `setup`, `windows`, `channels`, `workspace`, `friends` |
 
 ## Limits worth knowing
 
@@ -231,6 +261,11 @@ Four, in Setup > Plugins or with `omarchy bar set`:
   muting.
 - **Muting here is not Discord's mute button.** Discord's own UI will still
   show you as unmuted while PipeWire feeds it silence.
+- **Joining a channel needs the voice controls.** The rows are there without
+  them, but only the bridge can press Discord's join button for you.
+- **A cold start waits for Discord's voice engine.** Nothing tells the bridge
+  when a freshly started client can take a join, so it asks with a timeout,
+  retries once, and reports after a minute if Discord never answered.
 
 Both limits go away with the optional bridge below, which drives Discord's own
 mute instead.

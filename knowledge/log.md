@@ -6,6 +6,14 @@ description: What changed in this bundle and when
 
 # Log
 
+## 2026-09-25
+
+The panel gained folding sections and favourite voice channels.
+`discord-rpc-voice-channels` records the listing calls, the join, the hold and
+the cold start as measured, plus the probing trap that ended a call;
+`plugin-design-decisions` gains the fold, the 720 px cap, the missing join
+letter and the absence of auto-join.
+
 ## 2026-09-24, night
 
 `betterdiscord-presence-file` moves to stable: the plugin ran inside a live

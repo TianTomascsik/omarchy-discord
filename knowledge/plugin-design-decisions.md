@@ -71,3 +71,30 @@ naming the command instead.
 - **`desktopId`, `windowClass` and `processName` settings.** One box, one shape,
   the Arch `discord` package. A Flatpak or a fork is a real change with a real
   test, not a configuration knob.
+
+# Sections fold, the panel does not tab
+
+Seven sections outgrew the 560 px cap and the panel scrolled. No first-party
+panel folds, tabs or pages, so the fold was built out of their parts: a
+`PanelSectionHeader` on the left, the section's one-line state on the right in
+the caption the audio panel uses for its level, and a `PanelActionButton`
+chevron carrying the cursor ring, as the network band switch does in its
+header. The whole header row clicks; Enter on it folds. The fold list is a
+setting, so it survives restarts, and the defaults fold only what fits its
+caption: the workspace preset and the friends list. The cap moved from 560 to
+720 px: 640, the Agents panel's number, still scrolled by one header in a call
+with a favourite and the defaults open, and the screen has about 1690. The
+Flickable stays as the net under a fully opened panel with a long watch list.
+
+# No letter key for join
+
+`j` is cursor-down in every panel and nothing else reads as "join". The
+channel rows are one `j` away from the top, and `omarchy-shell discord join`
+covers a keybinding, so the panel has no join letter.
+
+# No auto-join on start
+
+A favourite that joined itself whenever Discord came up would ring a channel
+every time the client restarted for an update. The one-press row starts
+Discord and joins when asked; nothing joins unasked.
+
