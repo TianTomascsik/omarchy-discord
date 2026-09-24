@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.thisisgm.discord",
   "name": "Discord",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "author": "GM",
   "license": "MIT",
   "description": "Discord in the Omarchy bar: attention badge, call state, volume, window focus, memory footprint, a workspace preset, favourite voice channels you join in one press, and friend online notifications.",
@@ -27,7 +27,8 @@
       "collapsed": [
         "workspace",
         "friends"
-      ]
+      ],
+      "joinInBackground": true
     },
     "schema": [
       {
@@ -47,6 +48,12 @@
         "type": "boolean",
         "label": "Switch to that workspace when Discord opens",
         "defaultValue": false
+      },
+      {
+        "key": "joinInBackground",
+        "type": "boolean",
+        "label": "A channel join starts Discord in the background even when launches switch",
+        "defaultValue": true
       },
       {
         "key": "watchedFriends",

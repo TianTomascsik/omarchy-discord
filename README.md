@@ -161,6 +161,12 @@ By default the move is silent and you stay where you are. The **Switch to it**
 toggle, shown once a workspace is picked, follows the window instead. `Enter`
 on the row steps through the workspaces for keyboard use.
 
+With switching on, one launch is treated differently: a channel join. Pressing
+a favourite, or `omarchy-shell discord join`, is something you do from
+wherever you are working, so **Joining a channel** defaults to starting
+Discord in the background on its workspace, and only that row's switch makes a
+join follow the window like any other launch.
+
 Silent takes one extra step on Omarchy. Discord activates its own window
 about a second after it appears, and Omarchy's Hyprland config has
 `focus_on_activate` on, so the compositor would follow it anyway. The plugin
@@ -236,13 +242,14 @@ too.
 
 ## Settings
 
-Six, in Setup > Plugins or with `omarchy bar set`:
+Seven, in Setup > Plugins or with `omarchy bar set`:
 
 | Key | Type | Does |
 |---|---|---|
 | `hideWhenStopped` | boolean | hide the icon when Discord is not running |
 | `workspace` | string | workspace id or name Discord opens on; `""` leaves it alone |
 | `followWorkspace` | boolean | switch to that workspace instead of moving silently |
+| `joinInBackground` | boolean | a channel join starts Discord without switching, even when `followWorkspace` is on |
 | `watchedFriends` | array of `{id, name}` | friends to announce; edited from the panel |
 | `favouriteChannels` | array of `{id, name, guildId, guild}` | voice channels with a join row; edited from the panel |
 | `collapsed` | array of section ids | headers that start folded: `voice`, `setup`, `windows`, `channels`, `workspace`, `friends` |

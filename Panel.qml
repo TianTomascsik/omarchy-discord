@@ -23,6 +23,7 @@ Panel {
   // "" leaves Discord wherever Hyprland puts it; anything else is a workspace id or name.
   readonly property string workspacePreset: String(setting("workspace", ""))
   readonly property bool followWorkspace: setting("followWorkspace", false) === true
+  readonly property bool joinInBackground: setting("joinInBackground", true) === true
   readonly property var watchedFriends: Model.entryList(settings ? settings.watchedFriends : null)
   readonly property var favouriteChannels: Model.entryList(settings ? settings.favouriteChannels : null)
   // Folded headers, remembered in shell.json; null means the defaults have never been touched.
@@ -207,6 +208,7 @@ Panel {
     if (!isCollapsed("workspace")) {
       list.push({ kind: "workspace" })
       if (root.workspacePreset !== "") list.push({ kind: "follow" })
+      if (root.workspacePreset !== "" && root.followWorkspace) list.push({ kind: "joinBackground" })
     }
     if (friendsVisible) {
       list.push({ kind: "section", key: "friends" })
@@ -269,6 +271,7 @@ Panel {
     case "addChannel": if (root.channelControl) root.channelControl.open(); break
     case "workspace": root.persist("workspace", Model.nextOption(root.workspaceOptions, root.workspacePreset)); break
     case "follow": root.persist("followWorkspace", !root.followWorkspace); break
+    case "joinBackground": root.persist("joinInBackground", !root.joinInBackground); break
     case "friend": root.unwatchFriend(discord.watchedRows[currentRow.key].id); break
     case "grant": discord.grantFriends(); break
     case "watch": if (root.watchControl) root.watchControl.open(); break
@@ -294,6 +297,7 @@ Panel {
     id: discord
     workspacePreset: root.workspacePreset
     followWorkspace: root.followWorkspace
+    joinInBackground: root.joinInBackground
     watchedFriends: root.watchedFriends
     favouriteChannels: root.favouriteChannels
   }
@@ -822,12 +826,23 @@ Panel {
             SectionHeader {
               sectionId: "workspace"
               title: "WORKSPACE"
-              summary: Model.workspaceSummary(root.workspacePreset, root.followWorkspace)
+              summary: Model.workspaceSummary(root.workspacePreset, root.followWorkspace, root.joinInBackground)
             }
 
-            WorkspaceRow {
+            Column {
               visible: !root.isCollapsed("workspace")
               width: parent.width
+              spacing: Style.space(6)
+
+              WorkspaceRow {
+                width: parent.width
+              }
+
+              // Only meaningful while launches switch; a silent preset already keeps you where you are.
+              JoinBackgroundRow {
+                visible: root.workspacePreset !== "" && root.followWorkspace
+                width: parent.width
+              }
             }
           }
 
@@ -1482,6 +1497,84 @@ Panel {
         PanelToolTip {
           visible: followSwitch.containsMouse
           text: root.followWorkspace ? "Switches to it" : "Moves it silently"
+          fontFamily: root.fontFamily
+        }
+      }
+    }
+  }
+
+  // The one exception to "Switch to it": a launch that a channel join caused stays in the background.
+  component JoinBackgroundRow: CursorSurface {
+    id: joinBackgroundRow
+    readonly property int navIndex: root.indexOfRow("joinBackground", -1)
+
+    hasCursor: root.cursorActive && root.rowIndex === navIndex
+    foreground: root.foreground
+    implicitHeight: joinBackgroundContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: root.setCursor(joinBackgroundRow.navIndex)
+      onClicked: root.persist("joinInBackground", !root.joinInBackground)
+    }
+
+    RowLayout {
+      id: joinBackgroundContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+      spacing: Style.space(8)
+
+      Text {
+        textFormat: Text.PlainText
+        text: "󰋋"
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.icon
+        Layout.alignment: Qt.AlignVCenter
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(1)
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: "Joining a channel"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: root.joinInBackground ? "Starts Discord in the background" : "Switches to Discord like any launch"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+      }
+
+      ToggleSwitch {
+        id: joinBackgroundSwitch
+        checked: root.joinInBackground
+        foreground: root.foreground
+        hasCursor: joinBackgroundRow.hasCursor
+        onToggled: root.persist("joinInBackground", !root.joinInBackground)
+        onHovered: function (on) { if (on) root.setCursor(joinBackgroundRow.navIndex) }
+        Layout.alignment: Qt.AlignVCenter
+
+        PanelToolTip {
+          visible: joinBackgroundSwitch.containsMouse
+          text: root.joinInBackground ? "Stays where you are" : "Follows Discord"
           fontFamily: root.fontFamily
         }
       }

@@ -505,10 +505,17 @@ function toggleCollapsed(list, id) {
 }
 
 // What a folded header says about its section, in the caption the audio panel uses for its output level.
-function workspaceSummary(preset, follow) {
+function workspaceSummary(preset, follow, joinInBackground) {
   var text = String(preset || "")
   if (text === "") return "anywhere"
-  return text + (follow ? " · switches" : " · silent")
+  if (!follow) return text + " · silent"
+  return text + (joinInBackground ? " · switches, quiet joins" : " · switches")
+}
+
+// A join from the panel or the verb is the one launch where the user is elsewhere on purpose.
+function placementFollow(followWorkspace, joining, joinInBackground) {
+  if (joining && joinInBackground) return false
+  return followWorkspace === true
 }
 
 function friendsSummary(rows) {

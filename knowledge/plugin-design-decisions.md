@@ -92,6 +92,14 @@ Flickable stays as the net under a fully opened panel with a long watch list.
 channel rows are one `j` away from the top, and `omarchy-shell discord join`
 covers a keybinding, so the panel has no join letter.
 
+# A join is the launch that stays quiet
+
+"Switch to it" answers the question for a launch from the bar or a key: you
+asked for Discord, so you get it. A channel join is asked for from wherever
+you are working, usually to talk while doing something else, so it gets its
+own switch, on by default, that keeps the launch silent. It is only drawn
+while "Switch to it" is on, because a silent preset already keeps you put.
+
 # No auto-join on start
 
 A favourite that joined itself whenever Discord came up would ring a channel

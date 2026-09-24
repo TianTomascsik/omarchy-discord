@@ -310,9 +310,10 @@ TestCase {
   }
 
   function test_summaries_say_what_a_folded_header_hides() {
-    compare(Model.workspaceSummary("", false), "anywhere")
-    compare(Model.workspaceSummary("3", false), "3 · silent")
-    compare(Model.workspaceSummary("3", true), "3 · switches")
+    compare(Model.workspaceSummary("", false, true), "anywhere")
+    compare(Model.workspaceSummary("3", false, true), "3 · silent")
+    compare(Model.workspaceSummary("3", true, false), "3 · switches")
+    compare(Model.workspaceSummary("3", true, true), "3 · switches, quiet joins")
     compare(Model.friendsSummary([]), "")
     compare(Model.friendsSummary([{ status: "offline" }, { status: "unknown" }]), "2 watched")
     compare(Model.friendsSummary([{ status: "online" }, { status: "offline" }]), "1 online")
@@ -397,6 +398,15 @@ TestCase {
     compare(Model.matchFavourite([], "general"), null)
     compare(Model.favouriteName(favourites, "2"), "#gen-afk")
     compare(Model.favouriteName(favourites, "9"), "9")
+  }
+
+  // A join is the one launch made from elsewhere on purpose, so it alone can override "Switch to it".
+  function test_placementFollow_lets_a_join_stay_in_the_background() {
+    verify(Model.placementFollow(true, false, true))
+    verify(!Model.placementFollow(true, true, true))
+    verify(Model.placementFollow(true, true, false))
+    verify(!Model.placementFollow(false, false, true))
+    verify(!Model.placementFollow(false, true, false))
   }
 
   function test_joinFailure_names_the_documented_codes() {

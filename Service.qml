@@ -20,6 +20,8 @@ Item {
   // Panel hands these down from shell.json; "" leaves Discord wherever Hyprland puts it.
   property string workspacePreset: ""
   property bool followWorkspace: false
+  // A launch that a join caused lands Discord on its workspace without switching, whatever followWorkspace says.
+  property bool joinInBackground: true
   // Entries look like { id: "80351110224678912", name: "gm" }.
   property var watchedFriends: []
   // Entries look like { id: "1", name: "General", guildId: "10", guild: "GM's Server" }.
@@ -334,8 +336,9 @@ Item {
   function placeWindow(address, currentWorkspace) {
     if (workspacePreset === "" || !address) return
     if (Model.sameWorkspace(currentWorkspace, workspacePreset)) return
-    dispatch(Model.moveDispatch(address, workspacePreset, followWorkspace, Hyprland.usingLua))
-    if (!followWorkspace) holdActivation(address)
+    var follow = Model.placementFollow(followWorkspace, pendingJoin !== "", joinInBackground)
+    dispatch(Model.moveDispatch(address, workspacePreset, follow, Hyprland.usingLua))
+    if (!follow) holdActivation(address)
   }
 
   // Discord activates itself about a second after its window maps, and Omarchy's focus_on_activate would follow it.
