@@ -255,6 +255,41 @@ TestCase {
     compare(Model.countOnline(friendList), 2)
   }
 
+  function test_parseFriendsFile_reads_the_betterdiscord_plugins_shape() {
+    var parsed = Model.parseFriendsFile('{"schema":1,"active":true,"updatedAt":5,"friends":[{"id":1,"name":"GM","status":"ONLINE"},{"id":"2","status":"invisible"},{"name":"nobody"}]}')
+    verify(parsed.active)
+    compare(parsed.updatedAt, 5)
+    compare(parsed.friends.length, 2)
+    compare(parsed.friends[0].id, "1")
+    compare(parsed.friends[0].status, "online")
+    compare(parsed.friends[1].name, "2")
+    compare(parsed.friends[1].status, "offline")
+  }
+
+  function test_parseFriendsFile_rejects_garbage_and_other_schemas() {
+    compare(Model.parseFriendsFile(""), null)
+    compare(Model.parseFriendsFile("not json"), null)
+    compare(Model.parseFriendsFile('{"schema":2,"friends":[]}'), null)
+    compare(Model.parseFriendsFile('[]'), null)
+    var stopped = Model.parseFriendsFile('{"schema":1,"active":false}')
+    verify(!stopped.active)
+    compare(stopped.friends.length, 0)
+  }
+
+  function test_friendsFileFresh_expires_a_dead_client() {
+    verify(Model.friendsFileFresh(1000, 1000 + Model.FRIENDS_STALE_MS - 1))
+    verify(!Model.friendsFileFresh(1000, 1000 + Model.FRIENDS_STALE_MS))
+    verify(!Model.friendsFileFresh(0, 5000))
+  }
+
+  function test_watchedList_accepts_the_bare_object_the_cli_stores() {
+    compare(Model.watchedList([{ id: "1" }]).length, 1)
+    compare(Model.watchedList({ id: "1", name: "amy" }).length, 1)
+    compare(Model.watchedList({ name: "no id" }).length, 0)
+    compare(Model.watchedList(null).length, 0)
+    compare(Model.watchedList("x").length, 0)
+  }
+
   function test_addWatched_and_removeWatched_keep_the_list_deduplicated() {
     var one = Model.addWatched([], "1", "amy")
     var same = Model.addWatched(one, "1", "amy again")

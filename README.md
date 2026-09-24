@@ -164,11 +164,37 @@ omarchy bar set io.github.thisisgm.discord workspace '""' --json   # back to "an
 
 ## Friend notifications
 
-With the optional RPC tier below set up, the panel gains a **Friends** section.
-**Watch a friend** searches your friend list; each watched friend gets a row
-with a presence dot, their name and their status, and its switch stops
-watching. When a watched friend goes from offline to online, idle or do not
-disturb, the shell raises a notification, and clicking it raises Discord.
+The panel's **Friends** section lets you watch friends and be told when they
+come online. **Watch a friend** searches your friend list; each watched friend
+gets a row with a presence dot, their name and their status, and its switch
+stops watching. When a watched friend goes from offline to online, idle or do
+not disturb, the shell raises a notification, and clicking it raises Discord.
+
+Discord only hands the friend list to applications it has approved for the
+`relationships.read` scope, and it refuses an ordinary one (measured, see the
+RPC section below). So the list comes from inside the client instead: this
+repo ships **OmarchyDiscord**, a small plugin for
+[BetterDiscord](https://betterdiscord.app) that reads Discord's own friend and
+presence stores and writes them to `~/.local/state/omarchy-discord/friends.json`,
+readable only by you and never sent anywhere. The widget watches that file.
+
+To enable it:
+
+1. Have BetterDiscord injected into your Discord. On Arch,
+   `yay -S betterdiscordctl` then `betterdiscordctl install`, and restart
+   Discord. A Discord update removes the injection, so repeat the `install`
+   when your BetterDiscord plugins stop appearing in Settings.
+2. Copy `betterdiscord/OmarchyDiscord.plugin.js` into
+   `~/.config/BetterDiscord/plugins/` and switch it on under
+   Settings > Plugins. The Friends section fills in within a second.
+3. The file carries a heartbeat every minute; if Discord dies with the plugin
+   still marked active, the widget stops trusting the file after three
+   minutes and says so.
+
+Without BetterDiscord the section explains where presence comes from and the
+rest of the plugin is unaffected. An application Discord *has* approved for
+`relationships.read` can use the bridge instead, through the
+**Enable friend presence** row.
 
 Three things keep it quiet: the first list after a connect only seeds, so
 nobody is announced for merely already being online; a friend added to the

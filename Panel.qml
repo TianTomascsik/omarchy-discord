@@ -23,20 +23,17 @@ Panel {
   // "" leaves Discord wherever Hyprland puts it; anything else is a workspace id or name.
   readonly property string workspacePreset: String(setting("workspace", ""))
   readonly property bool followWorkspace: setting("followWorkspace", false) === true
-  readonly property var watchedFriends: settings && settings.watchedFriends instanceof Array ? settings.watchedFriends : []
+  readonly property var watchedFriends: Model.watchedList(settings ? settings.watchedFriends : null)
   readonly property var workspaceOptions: Model.workspaceOptions(discord.workspaces)
   readonly property int presetDropdownWidth: Style.space(170)
 
-  // The friends section earns its place once the bridge exists or someone is watched.
+  // The section is always there while Discord runs, so the hint can say where presence comes from.
   readonly property bool friendsVisible: discord.running
-    && (setupVisible || discord.rpc.connected || watchedFriends.length > 0 || discord.friendsError !== "")
   readonly property string friendsHint: {
     if (!discord.running) return ""
-    if (!discord.rpc.configured || discord.rpc.unauthorized) return "Set up voice controls above and friend notifications come with them."
+    if (discord.friendsKnown) return discord.watchedRows.length === 0 ? "Pick a friend to be told when they come online." : ""
     if (discord.friendsError !== "") return discord.friendsError
-    if (!discord.rpc.connected) return "Waiting for the voice bridge."
-    if (discord.friendsKnown && discord.watchedRows.length === 0) return "Pick a friend to be told when they come online."
-    return ""
+    return "Presence comes from the OmarchyDiscord plugin for BetterDiscord, shipped in this repo's betterdiscord folder. See the README to enable it."
   }
   // The searchable dropdown lives inside an inline component, so the cursor reaches it through this handle.
   property var watchControl: null

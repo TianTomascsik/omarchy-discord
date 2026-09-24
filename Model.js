@@ -407,6 +407,38 @@ function arrivals(previous, friends, watched) {
   return out
 }
 
+// Discord's status names, with invisible and anything unknown reading as offline.
+function normalizeStatus(status) {
+  var text = String(status || "").toLowerCase()
+  return isOnline(text) ? text : "offline"
+}
+
+// The BetterDiscord plugin writes {"schema":1,"active":true,"updatedAt":1727180000000,"friends":[{"id":"1","name":"GM","status":"online"}]}
+function parseFriendsFile(text) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(text || ""))
+  } catch (error) {
+    return null
+  }
+  if (!parsed || typeof parsed !== "object" || parsed.schema !== 1) return null
+  var friends = []
+  var list = parsed.friends instanceof Array ? parsed.friends : []
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i]
+    if (!entry || entry.id === undefined || entry.id === null || String(entry.id) === "") continue
+    friends.push({ id: String(entry.id), name: String(entry.name || entry.id), status: normalizeStatus(entry.status) })
+  }
+  return { active: parsed.active === true, updatedAt: Number(parsed.updatedAt) || 0, friends: friends }
+}
+
+// A file older than this is a client that died with the plugin still marked active.
+var FRIENDS_STALE_MS = 180000
+
+function friendsFileFresh(updatedAt, nowMs) {
+  return Number(updatedAt) > 0 && nowMs - Number(updatedAt) < FRIENDS_STALE_MS
+}
+
 function countOnline(rows) {
   var list = rows || []
   var count = 0
@@ -414,6 +446,13 @@ function countOnline(rows) {
     if (list[i] && isOnline(list[i].status)) count++
   }
   return count
+}
+
+// `omarchy bar set ... --json` stores a one-entry list as a bare object, so both shapes read as a list.
+function watchedList(value) {
+  if (value instanceof Array) return value
+  if (value && typeof value === "object" && value.id !== undefined) return [value]
+  return []
 }
 
 function addWatched(watched, id, name) {

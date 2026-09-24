@@ -97,13 +97,43 @@ Item {
 
   // ------------------------------------------------------------ friends
 
-  // The bridge's friend list, only with the relationships.read scope granted.
-  readonly property var friends: bridge.friends
-  readonly property bool friendsKnown: bridge.friendsOk
-  readonly property string friendsError: bridge.friendsError
+  // Source one: the BetterDiscord plugin in betterdiscord/ writes the client's own friend list here.
+  readonly property string friendsFilePath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state"))
+    + "/omarchy-discord/friends.json"
+  property var fileFriends: []
+  property bool fileActive: false
+  property real fileUpdatedAt: 0
+  // Bumped by every poll so a file that stopped updating goes stale without a file event.
+  property real clockMs: Date.now()
+  readonly property bool friendsFromClient: running && fileActive && Model.friendsFileFresh(fileUpdatedAt, clockMs)
+
+  FileView {
+    id: friendsFile
+    path: root.friendsFilePath
+    watchChanges: true
+    blockLoading: false
+    printErrors: false
+    onFileChanged: reload()
+    // text() is a function on the public FileView; the signal comes from the type underneath.
+    onTextChanged: root.applyFriendsFile(text())
+    onLoadFailed: root.applyFriendsFile("")
+  }
+
+  function applyFriendsFile(text) {
+    var parsed = Model.parseFriendsFile(text)
+    fileActive = parsed !== null && parsed.active
+    fileUpdatedAt = parsed !== null ? parsed.updatedAt : 0
+    fileFriends = parsed !== null ? parsed.friends : []
+    clockMs = Date.now()
+  }
+
+  // Source two: the bridge, for an application Discord has approved for relationships.read.
+  readonly property var friends: friendsFromClient ? fileFriends : bridge.friends
+  readonly property bool friendsKnown: friendsFromClient || bridge.friendsOk
+  readonly property string friendsError: friendsFromClient ? "" : bridge.friendsError
   readonly property string friendsScope: bridge.friendsScope
-  // Offered while the bridge is up without the friend scope; one consent modal follows.
-  readonly property bool friendsGrantable: bridge.connected && bridge.friendsScope !== "granted"
+  // The consent row is pointless while the client itself is supplying the list.
+  readonly property bool friendsGrantable: !friendsFromClient && bridge.connected && bridge.friendsScope !== "granted"
   readonly property var watchedRows: Model.watchedRows(friends, watchedFriends)
   readonly property var watchableFriends: Model.watchableFriends(friends, watchedFriends)
   readonly property int watchedOnline: Model.countOnline(watchedRows)
@@ -114,25 +144,21 @@ Item {
   property var lastNotifiedAt: ({})
   readonly property int notifyCooldownMs: 60000
 
-  Connections {
-    target: bridge
-    function onFriendsChanged() { root.trackPresence() }
-    function onReadyChanged() {
-      if (bridge.ready) return
-      root.presenceSeeded = false
-      root.lastPresence = {}
-    }
+  onFriendsChanged: trackPresence()
+  onFriendsKnownChanged: if (!friendsKnown) {
+    presenceSeeded = false
+    lastPresence = {}
   }
 
   function trackPresence() {
-    if (!bridge.friendsOk) return
+    if (!friendsKnown) return
     if (!presenceSeeded) {
-      lastPresence = Model.presenceMap(bridge.friends)
+      lastPresence = Model.presenceMap(friends)
       presenceSeeded = true
       return
     }
-    var arrivals = Model.arrivals(lastPresence, bridge.friends, watchedFriends)
-    lastPresence = Model.presenceMap(bridge.friends)
+    var arrivals = Model.arrivals(lastPresence, friends, watchedFriends)
+    lastPresence = Model.presenceMap(friends)
     var now = Date.now()
     for (var i = 0; i < arrivals.length; i++) {
       var friend = arrivals[i]
@@ -144,6 +170,7 @@ Item {
 
   // The shell's own notification server; clicking the toast raises Discord.
   function notifyOnline(friend) {
+    console.log("omarchy-discord notify: " + friend.name + " is " + friend.status)
     Util.execArgv(["omarchy-notification-send", "--app-name", "Discord", "-g", "󰂚", "-u", "normal",
       String(friend.name) + " is online", Model.presenceLabel(friend.status) + " on Discord",
       "--exec", "omarchy-shell", "discord", "raise"])
@@ -155,6 +182,7 @@ Item {
   function refresh() {
     if (!statusProcess.running) statusProcess.running = true
     bridge.refresh()
+    clockMs = Date.now()
   }
 
   function applyProcesses(raw) {

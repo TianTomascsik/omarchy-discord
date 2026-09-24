@@ -32,6 +32,7 @@ once, then `omarchy plugin update io.github.thisisgm.discord` after every push.
 omarchy plugin validate ~/.config/omarchy/plugins/io.github.thisisgm.discord
 python3 test_rpc.py
 QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests
+node --check betterdiscord/OmarchyDiscord.plugin.js
 qs log -p "$OMARCHY_PATH/shell" --tail 60 | grep -i thisisgm
 ```
 
@@ -48,7 +49,14 @@ grim -g "0,0 2560x32" /tmp/bar.png       # the bar
 grim -g "2130,28 420x460" /tmp/panel.png # the panel, once opened
 ```
 
-The friends section is testable the same way: the stub's lines carry
+The friends section is testable without BetterDiscord: write a
+`friends.json` in the plugin's shape to `~/.local/state/omarchy-discord/`
+with `active: true` and a current `updatedAt`, and the section fills in;
+flip a watched friend from `offline` to `online` in that file and the
+notification fires. The BetterDiscord plugin itself is exercised in Node with
+stubbed stores, the way the last commit that touched it did.
+
+The friends section is also testable through the bridge the same way: the stub's lines carry
 `friends`, `friendsOk` and `friendsError`, and `Service.qml` only ever reads
 those. The bridge's own parsing is covered in `test_rpc.py` with the payload
 shapes Discord documents.

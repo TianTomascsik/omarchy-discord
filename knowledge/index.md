@@ -26,4 +26,5 @@ records what changed and when.
 | [omarchy-bar-icon-weight](omarchy-bar-icon-weight.md) | matching a bar icon to its neighbours is about ink, not height |
 | [plugin-design-decisions](plugin-design-decisions.md) | the choices that are not obvious from the code, and what each one cost |
 | [hyprland-dispatch-from-quickshell](hyprland-dispatch-from-quickshell.md) | the Lua dispatch wrapper, and the 0x that Quickshell drops from every window address |
-| [discord-rpc-relationships](discord-rpc-relationships.md) | where friend presence comes from, and how the scope behind it is gated |
+| [discord-rpc-relationships](discord-rpc-relationships.md) | the RPC route to friend presence, and the refusal that closes it for ordinary applications |
+| [betterdiscord-presence-file](betterdiscord-presence-file.md) | the route that works: a BetterDiscord plugin writing a private file the widget watches |

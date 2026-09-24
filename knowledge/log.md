@@ -6,6 +6,13 @@ description: What changed in this bundle and when
 
 # Log
 
+## 2026-09-24, evening
+
+With the RPC route closed, friend presence moved inside the client:
+`betterdiscord-presence-file` records the BetterDiscord plugin, the file it
+writes and the trust rules the widget applies. Draft until a live
+BetterDiscord has run it.
+
 ## 2026-09-24, later still
 
 The friend scope was asked for on its own socket, after the voice tier was
