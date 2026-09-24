@@ -25,7 +25,7 @@ Panel {
   readonly property bool followWorkspace: setting("followWorkspace", false) === true
   readonly property var watchedFriends: settings && settings.watchedFriends instanceof Array ? settings.watchedFriends : []
   readonly property var workspaceOptions: Model.workspaceOptions(discord.workspaces)
-  readonly property int presetDropdownWidth: Style.space(150)
+  readonly property int presetDropdownWidth: Style.space(170)
 
   // The friends section earns its place once the bridge exists or someone is watched.
   readonly property bool friendsVisible: discord.running
@@ -1275,7 +1275,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           Layout.fillWidth: true
-          text: "Open Discord on"
+          text: "Opens on"
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -1285,8 +1285,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           Layout.fillWidth: true
-          text: root.workspacePreset === "" ? "Wherever Hyprland puts it"
-            : (root.followWorkspace ? "And switch to it" : "Without switching to it")
+          text: root.workspacePreset === "" ? "Anywhere" : (root.followWorkspace ? "And switches there" : "Silently")
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
