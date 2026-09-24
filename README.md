@@ -258,14 +258,24 @@ deafen, mic gain, and a leave-call row, and the mic row starts driving
 Discord's own mute. `--probe` re-checks it any time, and says whether friend
 presence was granted.
 
-The bridge asks for four scopes: `rpc`, `rpc.voice.read`, `rpc.voice.write`
-and `relationships.read`. The last one is what the friend list rides on, and
-Discord documents it as approval-gated in the same way as `rpc`: the
-application's owner and its App Testers can grant it to themselves, nobody
-else can. If Discord refuses it, the bridge falls back to the three voice
-scopes, the Friends section says so, and everything else keeps working. The
-refusal is remembered in the token so Discord's consent modal does not
-reappear on every connect; run `--setup` again to retry.
+The first consent asks for the three voice scopes only: `rpc`,
+`rpc.voice.read` and `rpc.voice.write`. Discord is asked exactly once per
+bridge start. If it refuses, the panel keeps the reason on screen, the bridge
+stays down rather than asking again every few seconds, and two rows appear:
+**Try authorizing again** with the saved application, and **Enter a different
+application**. The refusal you are most likely to meet is
+`Missing "redirect_uri" in request`, which means the application has no
+redirect saved on its OAuth2 page yet; add `http://localhost/omarchy-discord`
+there, click **Save Changes**, and try again.
+
+Friend presence rides a fourth scope, `relationships.read`, and Discord's
+portal does not list it for an ordinary application. So it is asked for
+separately, from the **Enable friend presence** row in the Friends section
+or as the second step of `--setup`, and a refusal there costs nothing: the
+voice tier keeps working, the row offers to ask again, and Discord's reason
+is shown. Whether Discord grants that scope to an application's owner is not
+settled; if yours refuses it, the Friends section will say exactly what
+Discord answered.
 
 If you are not the application's owner, your account has to be on its **App
 Testers** list; the owner is already covered.

@@ -43,6 +43,21 @@ with the three voice scopes, records `friendsRefused` in the token file so the
 consent modal does not reappear on every connect, and reports the reason in
 `friendsError`. `--setup` is the retry path and always asks for all four.
 
+# Measured on the way there
+
+A first-time application with no redirect saved fails `AUTHORIZE` outright
+with `OAuth2 Error: invalid_request: Missing "redirect_uri" in request.`
+That refusal arrives on the socket before any token exchange, and a bridge
+that reconnects after a failure turns it into a consent modal every few
+seconds. Authorization is therefore asked once per bridge process, and a
+refusal ends the process with a distinct exit code the widget does not
+respawn.
+
+The developer portal's OAuth2 URL generator, checked on 2026-09-24, offers
+`rpc`, `rpc.voice.read`, `rpc.voice.write`, `rpc.notifications.read` and
+the other rpc scopes, but not `relationships.read`. That is why the friend
+scope is requested on its own, after the voice tier is already working.
+
 # What is still open
 
 Whether `AUTHORIZE` with `relationships.read` is accepted for an unapproved

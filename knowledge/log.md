@@ -6,6 +6,14 @@ description: What changed in this bundle and when
 
 # Log
 
+## 2026-09-24, later
+
+The first real setup on a fresh application produced the refusal recorded
+in `discord-rpc-relationships`: no redirect saved yet, and a bridge that
+asked again every five seconds. The same session found that the portal does
+not offer `relationships.read`, which moved the friend scope out of the
+first consent.
+
 ## 2026-09-24, in the fork
 
 Two facts joined the bundle while adding the workspace preset and friend
