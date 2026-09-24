@@ -13,8 +13,11 @@ Item {
   // A bridge that cannot start stops being retried, rather than respawning python3 forever.
   readonly property int maxRestarts: 5
   property int restarts: 0
-  // rpc.py exits 2 when no credentials exist, which no amount of retrying fixes.
+  // rpc.py exits 2 when no credentials exist and 3 when Discord would not issue a token; retrying fixes neither.
   readonly property int exitUnconfigured: 2
+  readonly property int exitUnauthorized: 3
+  // Set by the bridge's last line before exit 3, and only a fresh Discord or a new setup lifts it.
+  property bool unauthorized: false
 
   // Qt hands back a file:// URL and Process needs a plain path.
   readonly property string scriptPath: String(Qt.resolvedUrl("rpc.py")).replace("file://", "")
@@ -37,6 +40,8 @@ Item {
   property var friends: []
   property bool friendsOk: false
   property string friendsError: ""
+  // "granted", "missing" (never asked) or "refused" (Discord said no, friendsError says why).
+  property string friendsScope: "missing"
 
   // Not error === "": rpc.py warns on stderr about refusals it survives, and a warning is not a disconnect.
   readonly property bool connected: ready
@@ -54,12 +59,19 @@ Item {
     friendsOk = false
   }
 
-  // Setup happens while the shell runs, so opening the panel re-checks.
+  // Setup happens while the shell runs, so opening the panel re-checks; a refused authorization is not re-asked.
   function retry() {
     probing = true
-    error = ""
+    // The refusal's reason is the one thing the panel must keep showing until someone acts on it.
+    if (!unauthorized) error = ""
     restarts = 0
     holdOff = false
+  }
+
+  // New credentials, or an explicit try again, are the only things that raise the consent modal once more.
+  function reauthorize() {
+    unauthorized = false
+    retry()
   }
 
   function send(message) {
@@ -70,6 +82,7 @@ Item {
   function setMute(value) { send({ cmd: "mute", value: value === true }) }
   function setDeaf(value) { send({ cmd: "deaf", value: value === true }) }
   function setInputVolume(value) { send({ cmd: "inputVolume", value: Math.round(value) }) }
+  function grantFriends() { send({ cmd: "grantFriends" }) }
   function hangUp() { send({ cmd: "disconnect" }) }
   function refresh() { send({ cmd: "refresh" }) }
 
@@ -81,9 +94,12 @@ Item {
     if (state.ok === false) {
       // Only the unconfigured line says the tier can never work; any other error got past that check.
       root.configured = state.configured !== false
+      root.unauthorized = state.unauthorized === true
       root.probing = false
       root.error = String(state.error || "Discord RPC failed")
       root.ready = false
+      // A fatal line is worth a trace in the shell log, since the bridge exits right after it.
+      if (root.unauthorized) console.warn("omarchy-discord bridge: " + root.error)
       return
     }
 
@@ -101,6 +117,8 @@ Item {
     root.friends = state.friends instanceof Array ? state.friends : []
     root.friendsOk = state.friendsOk === true
     root.friendsError = String(state.friendsError || "")
+    root.friendsScope = String(state.friendsScope || "missing")
+    root.unauthorized = false
     root.ready = true
     root.restarts = 0
   }
@@ -113,11 +131,12 @@ Item {
     holdOff = false
     restarts = 0
     error = ""
+    unauthorized = false
   }
 
   Process {
     id: bridge
-    running: root.active && (root.configured || root.probing) && !root.holdOff
+    running: root.active && (root.configured || root.probing) && !root.holdOff && !root.unauthorized
     command: ["python3", root.scriptPath]
     stdinEnabled: true
 
@@ -137,7 +156,7 @@ Item {
 
     onExited: function (exitCode) {
       // Discord quitting takes the bridge with it, and that is not a failure to count.
-      if (!root.active || exitCode === root.exitUnconfigured) return
+      if (!root.active || exitCode === root.exitUnconfigured || exitCode === root.exitUnauthorized) return
       root.holdOff = true
       root.restarts += 1
       // Past the budget the hold stays until retry() or the next Discord lifts it.

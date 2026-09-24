@@ -289,10 +289,111 @@ def a_refused_friend_list_leaves_voice_alone():
     check("and friendsOk is false", bridge.state["friendsOk"] is False)
     check("and the session itself is still ok", bridge.state["ok"] is True)
 
-    disabled = rpc.Bridge(FakeRpc(), friends_enabled=False)
-    disabled.load_friends()
-    check("without the scope the reason names the scope",
-          rpc.FRIENDS_SCOPE in disabled.state["friendsError"], disabled.state)
+    missing = rpc.Bridge(FakeRpc(), friends_enabled=False, friends_scope="missing")
+    missing.load_friends()
+    check("a scope never asked for is not an error", missing.state["friendsError"] == "", missing.state)
+    check("and is reported as missing", missing.state["friendsScope"] == "missing", missing.state)
+    refused = rpc.Bridge(FakeRpc(), friends_enabled=False, friends_scope="refused", friends_reason="Unauthorized")
+    refused.load_friends()
+    check("a refused scope carries Discord's reason", "Unauthorized" in refused.state["friendsError"], refused.state)
+
+
+@contextlib.contextmanager
+def stubbed(**replacements):
+    """Swap module functions for the duration of one case."""
+    originals = {name: getattr(rpc, name) for name in replacements}
+    for name, value in replacements.items():
+        setattr(rpc, name, value)
+    try:
+        yield
+    finally:
+        for name, value in originals.items():
+            setattr(rpc, name, value)
+
+
+def a_cached_token_is_never_reprompted():
+    """The loop the first release had: every reconnect asked Discord again."""
+    asked = []
+    with stubbed(valid_token=lambda *a: {"access_token": "t", "scope": "rpc"},
+                 authorize=lambda *a: asked.append(a) or {}):
+        token = rpc.obtain_token(None, "id", "secret")
+    check("a cached token is used as is", token["access_token"] == "t", token)
+    check("and Discord is not asked", asked == [], asked)
+
+
+def a_first_authorization_asks_for_voice_only_once():
+    asked = []
+    with stubbed(valid_token=lambda *a: None,
+                 authorize=lambda rpc_, cid, sec, scopes: asked.append(list(scopes)) or {"access_token": "t", "scope": " ".join(scopes)}):
+        token = rpc.obtain_token(None, "id", "secret")
+    check("exactly one consent", len(asked) == 1, asked)
+    check("for the voice scopes only", asked[0] == rpc.BASE_SCOPES, asked)
+    check("and the token comes back", token["access_token"] == "t", token)
+
+
+def a_refused_authorization_is_fatal_not_a_loop():
+    def refuse(*a):
+        raise rpc.RpcRejected("declined")
+    with stubbed(valid_token=lambda *a: None, authorize=refuse):
+        try:
+            rpc.obtain_token(None, "id", "secret")
+            check("a refusal raises AuthorizationFailed", False, "no exception")
+        except rpc.AuthorizationFailed as error:
+            check("a refusal raises AuthorizationFailed, naming the cause", "declined" in str(error), error)
+    check("AuthorizationFailed is still an RpcError", issubclass(rpc.AuthorizationFailed, rpc.RpcError))
+
+
+def a_missing_redirect_is_explained_in_the_refusal():
+    """The one refusal a first-time user hits, measured live: the portal had no redirect saved."""
+    def refuse(*a):
+        raise rpc.RpcRejected('OAuth2 Error: invalid_request: Missing "redirect_uri" in request.')
+    with stubbed(valid_token=lambda *a: None, authorize=refuse):
+        try:
+            rpc.obtain_token(None, "id", "secret")
+            check("a missing redirect raises", False, "no exception")
+        except rpc.AuthorizationFailed as error:
+            check("a missing redirect names the URI to register", rpc.REDIRECT_URI in str(error), error)
+    check("other refusals get no hint", rpc.authorization_hint("declined") == "")
+
+
+def granting_friends_records_a_refusal_with_its_reason():
+    saved = []
+    def refuse(*a):
+        raise rpc.RpcRejected("Invalid scope")
+    with stubbed(authorize=refuse, load_token=lambda: {"access_token": "t", "scope": "rpc"},
+                 save_token=lambda t: saved.append(t)):
+        token = rpc.grant_friends_scope(None, "id", "secret")
+    scope, reason = rpc.friends_scope_state(token)
+    check("a refused grant is remembered", scope == "refused" and token.get("friendsRefused") is True, token)
+    check("with Discord's reason", reason == "Invalid scope", reason)
+    check("and written to disk", saved == [token], saved)
+    check("without losing the voice token", token["access_token"] == "t", token)
+
+
+def granting_friends_detects_a_token_that_lacks_the_scope():
+    saved = []
+    with stubbed(authorize=lambda *a: {"access_token": "t2", "scope": "rpc rpc.voice.read rpc.voice.write"},
+                 save_token=lambda t: saved.append(t)):
+        token = rpc.grant_friends_scope(None, "id", "secret")
+    scope, reason = rpc.friends_scope_state(token)
+    check("a token without the scope reads as refused", scope == "refused", token)
+    check("and names the scope", rpc.FRIENDS_SCOPE in reason, reason)
+    granted = {"scope": "rpc " + rpc.FRIENDS_SCOPE}
+    check("a token with the scope reads as granted", rpc.friends_scope_state(granted) == ("granted", ""))
+    check("a plain token reads as missing", rpc.friends_scope_state({"scope": "rpc"}) == ("missing", ""))
+
+
+def the_grant_command_reaches_the_bridge():
+    fake = FakeRpc()
+    fake.relationships = [{"type": 1, "user": {"id": "1", "username": "gm"}, "presence": {"status": "online"}}]
+    bridge = rpc.Bridge(fake, friends_enabled=False, client_id="id", client_secret="secret", friends_scope="missing")
+    with stubbed(authorize=lambda *a: {"access_token": "t2", "scope": "rpc " + rpc.FRIENDS_SCOPE},
+                 save_token=lambda t: None):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            bridge.handle_command('{"cmd":"grantFriends"}')
+    state = json.loads(out.getvalue().splitlines()[-1])
+    check("a granted scope re-authenticates and lists friends",
+          state["friendsScope"] == "granted" and [f["id"] for f in state["friends"]] == ["1"], state)
 
 
 def a_relationship_event_in_the_loop_emits_the_friend():
@@ -339,7 +440,14 @@ def main():
                  load_friends_lists_and_subscribes,
                  a_refused_friend_list_leaves_voice_alone,
                  a_relationship_event_in_the_loop_emits_the_friend,
-                 has_scope_reads_discords_space_separated_list):
+                 has_scope_reads_discords_space_separated_list,
+                 a_cached_token_is_never_reprompted,
+                 a_first_authorization_asks_for_voice_only_once,
+                 a_refused_authorization_is_fatal_not_a_loop,
+                 a_missing_redirect_is_explained_in_the_refusal,
+                 granting_friends_records_a_refusal_with_its_reason,
+                 granting_friends_detects_a_token_that_lacks_the_scope,
+                 the_grant_command_reaches_the_bridge):
         case()
     print("\n%d failed" % len(FAILURES) if FAILURES else "\nall passed")
     return 1 if FAILURES else 0

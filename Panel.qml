@@ -32,7 +32,7 @@ Panel {
     && (setupVisible || discord.rpc.connected || watchedFriends.length > 0 || discord.friendsError !== "")
   readonly property string friendsHint: {
     if (!discord.running) return ""
-    if (!discord.rpc.configured) return "Set up voice controls above and friend notifications come with them."
+    if (!discord.rpc.configured || discord.rpc.unauthorized) return "Set up voice controls above and friend notifications come with them."
     if (discord.friendsError !== "") return discord.friendsError
     if (!discord.rpc.connected) return "Waiting for the voice bridge."
     if (discord.friendsKnown && discord.watchedRows.length === 0) return "Pick a friend to be told when they come online."
@@ -57,7 +57,8 @@ Panel {
   // Must match REDIRECT_URI in rpc.py.
   readonly property string redirectUri: "http://localhost/omarchy-discord"
 
-  readonly property bool setupVisible: discord.running && !discord.rpc.configured
+  // Unauthorized keeps the setup row so new credentials can be entered, alongside the reason.
+  readonly property bool setupVisible: discord.running && (!discord.rpc.configured || discord.rpc.unauthorized)
   property bool setupOpen: false
   property string setupError: ""
 
@@ -137,6 +138,7 @@ Panel {
     if (callControls) list.push({ kind: "hangup" })
     if (callControls) list.push({ kind: "gain" })
     if (discord.hasPlayback) list.push({ kind: "volume" })
+    if (discord.rpc.unauthorized && !setupOpen) list.push({ kind: "reauth" })
     if (setupVisible && !setupOpen) list.push({ kind: "setup" })
     for (var i = 0; i < discord.windows.length; i++) list.push({ kind: "window", itemIndex: i })
     // The window rows already focus Discord, so this row is only for when there is none.
@@ -144,6 +146,7 @@ Panel {
     list.push({ kind: "workspace" })
     if (root.workspacePreset !== "") list.push({ kind: "follow" })
     if (root.friendsVisible) {
+      if (discord.friendsGrantable) list.push({ kind: "grant" })
       for (var f = 0; f < discord.watchedRows.length; f++) list.push({ kind: "friend", itemIndex: f })
       if (discord.watchableFriends.length > 0) list.push({ kind: "watch" })
     }
@@ -193,9 +196,11 @@ Panel {
     case "window": discord.focusWindow(discord.windows[currentRow.itemIndex]); root.close(); break
     case "open": if (discord.installed) { discord.open(); root.close() } break
     case "setup": root.openSetup(); break
+    case "reauth": discord.rpc.reauthorize(); break
     case "workspace": root.persist("workspace", Model.nextOption(root.workspaceOptions, root.workspacePreset)); break
     case "follow": root.persist("followWorkspace", !root.followWorkspace); break
     case "friend": root.unwatchFriend(discord.watchedRows[currentRow.itemIndex].id); break
+    case "grant": discord.grantFriends(); break
     case "watch": if (root.watchControl) root.watchControl.open(); break
     }
   }
@@ -281,7 +286,7 @@ Panel {
     onExited: function (exitCode) {
       if (exitCode !== 0) return
       root.resetSetup()
-      discord.rpc.retry()
+      discord.rpc.reauthorize()
     }
   }
 
@@ -444,7 +449,8 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
-            maximumLineCount: 2
+            // A refusal carries the fix in its text, so it gets the room to say it.
+            maximumLineCount: discord.rpc.unauthorized ? 5 : 2
             elide: Text.ElideRight
           }
 
@@ -517,12 +523,23 @@ Panel {
               width: parent.width
               spacing: Style.space(6)
 
+              // After a refusal the saved credentials are usually fine and only the portal needs a change.
+              ActionRow {
+                visible: discord.rpc.unauthorized && !root.setupOpen
+                width: parent.width
+                kind: "reauth"
+                glyph: "󰑐"
+                label: "Try authorizing again"
+                sub: "Asks Discord once more with the saved application"
+                onTriggered: discord.rpc.reauthorize()
+              }
+
               ActionRow {
                 visible: !root.setupOpen
                 width: parent.width
                 kind: "setup"
                 glyph: "󰒓"
-                label: "Set up voice controls"
+                label: discord.rpc.unauthorized ? "Enter a different application" : "Set up voice controls"
                 sub: "Channel name, deafen, hang up and friend notifications"
                 onTriggered: root.openSetup()
               }
@@ -701,6 +718,16 @@ Panel {
               id: friendColumn
               width: parent.width
               spacing: Style.space(6)
+
+              ActionRow {
+                visible: discord.friendsGrantable
+                width: parent.width
+                kind: "grant"
+                glyph: "󰂚"
+                label: discord.friendsScope === "refused" ? "Ask Discord again for friend presence" : "Enable friend presence"
+                sub: "One more consent prompt, for the relationships.read scope"
+                onTriggered: discord.grantFriends()
+              }
 
               Repeater {
                 model: discord.watchedRows

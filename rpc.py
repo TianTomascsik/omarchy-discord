@@ -67,6 +67,10 @@ class RpcRejected(RpcError):
     """Discord refused one command; the connection itself is still good."""
 
 
+class AuthorizationFailed(RpcError):
+    """No token could be had; asking again without the user changing something only repeats the modal."""
+
+
 def clip(text, limit):
     """Shorten for a log line, marking the cut so nobody reads it as the whole input."""
     text = str(text).strip()
@@ -304,20 +308,48 @@ def valid_token(client_id, client_secret):
     return None
 
 
+# Discord answers 'Missing "redirect_uri" in request' when the application has no redirect registered at all.
+def authorization_hint(error):
+    if "redirect_uri" in str(error):
+        return (" Add the redirect %s on the application's OAuth2 page, click Save Changes, "
+                "then try again." % REDIRECT_URI)
+    return ""
+
+
 def obtain_token(rpc, client_id, client_secret):
-    """A cached token that covers friends wins; otherwise ask for friends once, then settle for voice."""
+    """A cached token is never re-prompted; without one, the voice scopes are asked for exactly once."""
     token = valid_token(client_id, client_secret)
-    if token and (has_scope(token, FRIENDS_SCOPE) or token.get("friendsRefused")):
+    if token:
         return token
     try:
-        return authorize(rpc, client_id, client_secret, SCOPES)
+        return authorize(rpc, client_id, client_secret, BASE_SCOPES)
     except RpcError as error:
-        warn("Discord refused the %s scope, friend presence is off: %s" % (FRIENDS_SCOPE, error))
-    if not token:
-        token = authorize(rpc, client_id, client_secret, BASE_SCOPES)
-    # Remembered so a refused scope does not raise Discord's consent modal on every connect.
-    token["friendsRefused"] = True
-    save_token(token)
+        raise AuthorizationFailed("Discord authorization failed: %s.%s" % (error, authorization_hint(error)))
+
+
+# "granted" runs the friend list, "missing" offers the upgrade, "refused" carries Discord's last answer.
+def friends_scope_state(token):
+    if has_scope(token, FRIENDS_SCOPE):
+        return "granted", ""
+    if token.get("friendsRefused"):
+        return "refused", str(token.get("friendsRefusedReason") or "")
+    return "missing", ""
+
+
+def grant_friends_scope(rpc, client_id, client_secret):
+    """A second consent, on demand: the friend scope alone decides nothing about the voice tier."""
+    try:
+        token = authorize(rpc, client_id, client_secret, SCOPES)
+    except RpcError as error:
+        token = load_token()
+        token["friendsRefused"] = True
+        token["friendsRefusedReason"] = str(error)
+        save_token(token)
+        return token
+    if not has_scope(token, FRIENDS_SCOPE):
+        token["friendsRefused"] = True
+        token["friendsRefusedReason"] = "Discord issued a token without %s" % FRIENDS_SCOPE
+        save_token(token)
     return token
 
 
@@ -339,9 +371,14 @@ def friend_entry(data):
 
 
 class Bridge:
-    def __init__(self, rpc, friends_enabled=True):
+    def __init__(self, rpc, friends_enabled=True, client_id="", client_secret="",
+                 friends_scope="granted", friends_reason=""):
         self.rpc = rpc
         self.friends_enabled = friends_enabled
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.friends_scope = friends_scope
+        self.friends_reason = friends_reason
         self.subscribed_channel = None
         self.members = {}
         self.speaking = set()
@@ -351,7 +388,8 @@ class Bridge:
                       "deaf": False, "inputVolume": 100,
                       "speaking": [], "error": "",
                       "ping": 0, "voiceState": "",
-                      "friends": [], "friendsOk": False, "friendsError": ""}
+                      "friends": [], "friendsOk": False, "friendsError": "",
+                      "friendsScope": friends_scope}
 
     def emit(self):
         self.state["speaking"] = sorted(
@@ -375,9 +413,11 @@ class Bridge:
     # A refused GET_RELATIONSHIPS is reported in the state; the voice tier carries on regardless.
     def load_friends(self):
         self.friends = {}
+        self.state["friendsScope"] = self.friends_scope
         if not self.friends_enabled:
             self.state["friendsOk"] = False
-            self.state["friendsError"] = "Friend presence needs the %s scope" % FRIENDS_SCOPE
+            self.state["friendsError"] = ("Discord refused friend presence: %s" % self.friends_reason
+                                          if self.friends_scope == "refused" and self.friends_reason else "")
             return
         try:
             listing = self.rpc.request("GET_RELATIONSHIPS")
@@ -484,8 +524,22 @@ class Bridge:
             self.rpc.command("SELECT_VOICE_CHANNEL", {"channel_id": None, "force": True})
         elif name == "refresh":
             self.refresh()
+        elif name == "grantFriends":
+            self.grant_friends()
         else:
             warn("unknown command %r" % (name,))
+
+    # The panel's "Enable friend presence" row: one consent modal, then the list, or the reason it was refused.
+    def grant_friends(self):
+        if self.friends_enabled:
+            return
+        token = grant_friends_scope(self.rpc, self.client_id, self.client_secret)
+        self.friends_scope, self.friends_reason = friends_scope_state(token)
+        if self.friends_scope == "granted":
+            self.rpc.request("AUTHENTICATE", {"access_token": token["access_token"]})
+            self.friends_enabled = True
+        self.load_friends()
+        self.emit()
 
     def drain_commands(self):
         while True:
@@ -542,11 +596,14 @@ class Bridge:
                 self.emit()
 
 
-def emit_error(message, configured=True):
+def emit_error(message, configured=True, unauthorized=False):
     payload = {"ok": False, "error": str(message)}
     # The widget shows a failure but stays silent about a tier nobody set up.
     if not configured:
         payload["configured"] = False
+    # Tells the widget not to respawn the bridge, since that would only raise the modal again.
+    if unauthorized:
+        payload["unauthorized"] = True
     sys.stdout.write(json.dumps(payload) + "\n")
     sys.stdout.flush()
 
@@ -558,7 +615,9 @@ def session():
         handshake(rpc, client_id)
         token = obtain_token(rpc, client_id, client_secret)
         rpc.request("AUTHENTICATE", {"access_token": token["access_token"]})
-        Bridge(rpc, friends_enabled=has_scope(token, FRIENDS_SCOPE)).run()
+        scope, reason = friends_scope_state(token)
+        Bridge(rpc, friends_enabled=scope == "granted", client_id=client_id,
+               client_secret=client_secret, friends_scope=scope, friends_reason=reason).run()
     finally:
         rpc.close()
 
@@ -621,6 +680,7 @@ def save_from_stdin():
 
 
 EXIT_UNCONFIGURED = 2
+EXIT_UNAUTHORIZED = 3
 
 
 def ask(label):
@@ -698,19 +758,19 @@ def setup():
     print("Discord will now ask you to authorize it. Approve that prompt.\n")
     try:
         ready = handshake(rpc, client_id)
-        token = valid_token(client_id, client_secret)
-        # --setup is the retry path for a refused friends scope, so it always asks again.
-        if not token or not has_scope(token, FRIENDS_SCOPE):
-            token.pop("friendsRefused", None) if token else None
-            token = obtain_token(rpc, client_id, client_secret)
+        token = obtain_token(rpc, client_id, client_secret)
         rpc.request("AUTHENTICATE", {"access_token": token["access_token"]})
         print("Ready. Authenticated as %s."
               % (ready.get("user") or {}).get("username", "your account"))
-        if has_scope(token, FRIENDS_SCOPE):
+        # --setup is also the terminal route to the friend scope, asked for separately so voice never depends on it.
+        if not has_scope(token, FRIENDS_SCOPE):
+            print("Asking Discord for %s next; approve or decline that prompt as you like." % FRIENDS_SCOPE)
+            token = grant_friends_scope(rpc, client_id, client_secret)
+        scope, reason = friends_scope_state(token)
+        if scope == "granted":
             print("Friend presence is on: pick who to watch in the panel's Friends section.")
         else:
-            print("Friend presence is off: Discord did not grant %s to this application."
-                  % FRIENDS_SCOPE)
+            print("Friend presence is off: %s" % (reason or "Discord did not grant %s" % FRIENDS_SCOPE))
         print("Open the Discord panel in the bar and the call controls are there.")
         return 0
     except RpcError as error:
@@ -749,6 +809,10 @@ def main():
     while True:
         try:
             session()
+        except AuthorizationFailed as error:
+            # Looping here would raise Discord's consent modal every few seconds.
+            emit_error(error, unauthorized=True)
+            return EXIT_UNAUTHORIZED
         except RpcError as error:
             emit_error(error)
         except Exception as error:  # keep the bridge alive; the widget shows the text

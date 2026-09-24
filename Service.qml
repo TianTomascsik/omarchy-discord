@@ -101,6 +101,9 @@ Item {
   readonly property var friends: bridge.friends
   readonly property bool friendsKnown: bridge.friendsOk
   readonly property string friendsError: bridge.friendsError
+  readonly property string friendsScope: bridge.friendsScope
+  // Offered while the bridge is up without the friend scope; one consent modal follows.
+  readonly property bool friendsGrantable: bridge.connected && bridge.friendsScope !== "granted"
   readonly property var watchedRows: Model.watchedRows(friends, watchedFriends)
   readonly property var watchableFriends: Model.watchableFriends(friends, watchedFriends)
   readonly property int watchedOnline: Model.countOnline(watchedRows)
@@ -258,6 +261,10 @@ Item {
 
   function hangUp() {
     if (voiceKnown) bridge.hangUp()
+  }
+
+  function grantFriends() {
+    if (friendsGrantable) bridge.grantFriends()
   }
 
   function setMicGain(value) {
